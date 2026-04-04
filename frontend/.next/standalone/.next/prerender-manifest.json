@@ -1,54 +1,6 @@
 {
   "version": 4,
   "routes": {
-    "/ads": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "next-action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/ads",
-      "dataRoute": "/ads.rsc",
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
-    "/orders": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "next-action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/orders",
-      "dataRoute": "/orders.rsc",
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
     "/_not-found": {
       "initialStatus": 404,
       "experimentalBypassFor": [
@@ -74,7 +26,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/custom": {
+    "/customers": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -87,8 +39,32 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/custom",
-      "dataRoute": "/custom.rsc",
+      "srcRoute": "/customers",
+      "dataRoute": "/customers.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/orders": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/orders",
+      "dataRoute": "/orders.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -146,7 +122,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/customers": {
+    "/ads": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -159,8 +135,32 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/customers",
-      "dataRoute": "/customers.rsc",
+      "srcRoute": "/ads",
+      "dataRoute": "/ads.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/custom": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/custom",
+      "dataRoute": "/custom.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
