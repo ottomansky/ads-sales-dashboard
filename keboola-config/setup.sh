@@ -1,7 +1,12 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# Install Python + Node.js deps in parallel for faster startup
+# Install Python backend dependencies
 cd /app/backend && uv sync &
-cd /app/frontend && npm install --omit=dev --no-audit --no-fund &
+
+# Install Node.js deps + build Next.js standalone
+cd /app/frontend && npm install --no-audit --no-fund && npm run build \
+  && cp -R .next/static .next/standalone/.next/static \
+  && cp -R public .next/standalone/public &
+
 wait

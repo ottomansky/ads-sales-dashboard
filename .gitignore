@@ -3,12 +3,8 @@ node_modules/
 .pnp
 .pnp.js
 
-# Next.js — ignore build cache but keep standalone output for Keboola deployment
-frontend/.next/*
-!frontend/.next/standalone/
-!frontend/.next/standalone/**
-!frontend/.next/static/
-!frontend/.next/static/**
+# Next.js — built at startup in Keboola container, not committed
+frontend/.next/
 frontend/out/
 
 # Production

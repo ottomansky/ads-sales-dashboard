@@ -1,1 +1,0 @@
-self.__NEXT_FONT_MANIFEST='{"pages":{},"app":{"/Users/maxmilianottomansky/Desktop/01_Projects/01_Coding_Projects_Keboola/tmp_apps_test_2/frontend/app/layout":["static/media/bb3ef058b751a6ad-s.p.woff2","static/media/636a5ac981f94f8b-s.p.woff2"]},"appUsingSizeAdjust":true,"pagesUsingSizeAdjust":false}';
