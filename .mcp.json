@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tmp-apps-test-2-keboola": {
+      "type": "http",
+      "url": "https://mcp.europe-west3.gcp.keboola.com/mcp"
+    }
+  }
+}
