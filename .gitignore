@@ -3,10 +3,11 @@ node_modules/
 .pnp
 .pnp.js
 
-# Next.js
-frontend/.next/
-!frontend/.next/standalone/
-!frontend/.next/standalone/**
+# Next.js — ignore all .next/ content except the standalone build
+# (Use /* not / so the parent dir itself isn't ignored — git can't un-ignore
+# files inside an ignored directory)
+frontend/.next/*
+!frontend/.next/standalone
 frontend/out/
 
 # Production
