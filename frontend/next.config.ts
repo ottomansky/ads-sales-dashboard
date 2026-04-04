@@ -1,14 +1,12 @@
 import type { NextConfig } from 'next'
-import path from 'path'
 
 const nextConfig: NextConfig = {
   output: 'standalone', // Required for Keboola Docker deployment
 
-  // Set tracing root to project root (parent of frontend/).
-  // This makes standalone output use paths relative to the project root,
-  // so server.js lands at standalone/frontend/server.js — matching
-  // the Docker container path /app/frontend/.next/standalone/frontend/server.js
-  outputFileTracingRoot: path.join(__dirname, '../'),
+  // Set tracing root to frontend/ so standalone output is flat:
+  // server.js lands at standalone/server.js (not nested by absolute path).
+  // In Docker: /app/frontend/.next/standalone/server.js
+  outputFileTracingRoot: __dirname,
 
   // Proxy /api/* to the FastAPI backend during local development
   async rewrites() {

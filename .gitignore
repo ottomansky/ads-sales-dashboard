@@ -3,11 +3,12 @@ node_modules/
 .pnp
 .pnp.js
 
-# Next.js — ignore all .next/ content except the standalone build
-# (Use /* not / so the parent dir itself isn't ignored — git can't un-ignore
-# files inside an ignored directory)
+# Next.js — ignore build cache but keep standalone output for Keboola deployment
 frontend/.next/*
-!frontend/.next/standalone
+!frontend/.next/standalone/
+!frontend/.next/standalone/**
+!frontend/.next/static/
+!frontend/.next/static/**
 frontend/out/
 
 # Production
