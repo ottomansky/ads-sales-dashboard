@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+# Allow standalone's bundled node_modules (required for deployment)
+!frontend/.next/standalone/node_modules/
+!frontend/.next/standalone/node_modules/**
 .pnp
 .pnp.js
 
@@ -45,8 +48,8 @@ __pycache__/
 backend/venv/
 backend/.venv/
 *.egg-info/
-dist/
-build/
+backend/dist/
+backend/build/
 
 # IDE
 .vscode/
