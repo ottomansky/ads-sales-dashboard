@@ -1,13 +1,27 @@
+/**
+ * KAI Client -- Chart Utilities
+ * Source: keboola/kai-client/kai-nextjs/
+ * Copy verbatim. Only modify lines marked // CUSTOMIZE:
+ *
+ * Required consumer-app files (not in kai-nextjs template):
+ * - @/lib/constants — COLORS.chart array for chart palette
+ */
+
 import { COLORS } from '@/lib/constants'
+
+// -- Chart colors & types ----
 
 export const C = [...COLORS.chart, '#f97316', '#06b6d4', '#ec4899', '#1e3a8a']
 export const TYPES = ['bar', 'line', 'area', 'pie', 'horizontal-bar', 'stacked-bar']
 export type ChartType = (typeof TYPES)[number]
 
 export function parseNumber(s: string): number | null {
-  const cleaned = s.replace(/[$,%€£¥]/g, '').replace(/,/g, '').trim()
-  const n = Number(cleaned); return isNaN(n) ? null : n
+  const cleaned = s.replace(/[$,%\u20ac\u00a3\u00a5]/g, '').replace(/,/g, '').trim()
+  const n = Number(cleaned)
+  return isNaN(n) ? null : n
 }
+
+// -- ECharts option builder ----
 
 export function buildOption(headers: string[], rows: string[][], chartType: ChartType, fs: boolean): object | null {
   const numericCols = headers.slice(1).map((_, i) => rows.every((r) => parseNumber(r[i + 1] ?? '') !== null))
@@ -24,14 +38,19 @@ export function buildOption(headers: string[], rows: string[][], chartType: Char
   if (chartType === 'pie') {
     return {
       tooltip: { trigger: 'item' as const, formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: f } }, color: C,
-      series: [{ type: 'pie' as const, radius: ['32%', '62%'], center: ['50%', '45%'],
+      legend: { bottom: 0, textStyle: { fontSize: f } },
+      color: C,
+      series: [{
+        type: 'pie' as const, radius: ['32%', '62%'], center: ['50%', '45%'],
         data: labels.map((name, i) => ({ name, value: series[0]?.values[i] ?? 0 })),
-        label: { fontSize: f }, itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 2 } }],
+        label: { fontSize: f }, itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 2 },
+      }],
     }
   }
 
-  const isH = chartType === 'horizontal-bar', isLine = chartType === 'line' || chartType === 'area', isStacked = chartType === 'stacked-bar'
+  const isH = chartType === 'horizontal-bar'
+  const isLine = chartType === 'line' || chartType === 'area'
+  const isStacked = chartType === 'stacked-bar'
   const catData = isH ? [...labels].reverse() : labels
   const catAxis = { type: 'category' as const, data: catData, axisLabel: { fontSize: f, rotate: !isH && labels.length > 5 ? 25 : 0 } }
   const valAxis = { type: 'value' as const, scale: false, axisLabel: { fontSize: f }, splitLine: { lineStyle: { color: 'rgba(0,33,81,0.06)' } } }

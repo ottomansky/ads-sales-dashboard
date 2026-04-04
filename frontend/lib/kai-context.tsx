@@ -1,37 +1,87 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, useRef } from 'react'
+/**
+ * KAI Client — Chat Context Provider
+ * Source: keboola/kai-client/kai-nextjs/
+ * Copy verbatim. Only modify lines marked // CUSTOMIZE:
+ */
 
-export interface ChatMessage {
+import {
+  createContext,
+  useContext,
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  type ReactNode,
+} from 'react'
+import { ChatStorage, type Conversation } from './chat-storage'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface KaiMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  isStreaming?: boolean
-  toolApproval?: {
-    approvalId: string
-    toolName: string
-  }
+  streaming?: boolean
+  toolApproval?: { approvalId: string; toolCallId: string; toolName?: string }
 }
 
-export interface Conversation {
-  id: string
-  title: string
-  messages: ChatMessage[]
+export interface ToolCallState {
+  toolCallId: string
+  toolName?: string
+  toolArgs?: string
+  state: 'processing' | 'done' | 'error'
 }
 
-interface KaiChatContextType {
-  conversations: Map<string, Conversation>
-  activeConversationId: string | null
-  isOpen: boolean
+interface ResponseCache {
+  text: string
+  timestamp: number
+}
+
+// ─── Tool call markers (inline interleaving) ────────────────────────────────
+// Zero-width-space delimited markers injected into accumulatedText so
+// MessageBubble can split content and render inline tool call chips.
+
+export const TOOL_CALL_MARKER_RE = /\u200B\[tool:([^\]]+)\]\u200B/g
+export function makeToolCallMarker(id: string): string {
+  return `\u200B[tool:${id}]\u200B`
+}
+/** Strip tool call markers from text (for storage / cache) */
+export function stripToolMarkers(text: string): string {
+  return text.replace(/\u200B\[tool:[^\]]+\]\u200B/g, '')
+}
+
+export type LayoutMode = 'sidebar' | 'fullscreen'
+
+interface KaiChatContextValue {
+  // Chat state
+  messages: KaiMessage[]
   isStreaming: boolean
-  setOpen: (open: boolean) => void
-  sendMessage: (text: string) => Promise<void>
-  newConversation: () => void
-  approveToolCall: (chatId: string, approvalId: string) => Promise<void>
-  denyToolCall: (chatId: string, approvalId: string) => Promise<void>
+  conversationId: string
+  conversations: Conversation[]
+  toolCalls: ToolCallState[]
+  // Platform info (for Keboola table links)
+  connectionUrl: string
+  projectId: string
+  // Sheet/layout state
+  isOpen: boolean
+  layoutMode: LayoutMode
+  toggleChat: () => void
+  openChat: () => void
+  closeChat: () => void
+  expand: () => void
+  collapse: () => void
+  // Chat actions
+  sendMessage: (text: string, bypassCache?: boolean) => Promise<void>
+  handleApproval: (approved: boolean, approvalId: string) => Promise<void>
+  abortStreaming: () => void
+  startNewConversation: () => void
+  loadConversation: (id: string) => void
+  deleteConversation: (id: string) => void
 }
 
-const KaiChatContext = createContext<KaiChatContextType | null>(null)
+const KaiChatContext = createContext<KaiChatContextValue | null>(null)
 
 export function useKaiChat() {
   const ctx = useContext(KaiChatContext)
@@ -39,204 +89,548 @@ export function useKaiChat() {
   return ctx
 }
 
-function buildSystemContext(): string {
-  return `You are KAI, AI assistant for the Ads & Sales Dashboard. Tables: marketing_metrics (out.c-marketing_metrics.marketing_metrics) with columns date, orders, revenue, ad_costs, google_costs, meta_costs, cac, mer, roi, aov; orders (in.c-Shoptet-01K4YFRJC6VFPXWJW1WRJS98S0.orders) with columns code, date, itemName, totalPriceWithVat, statusName, paymentForm, deliveryCity; ga4_analytics with campaigns; meta_insights with ad names and spend. KPIs: Revenue=SUM(revenue), Orders=SUM(orders), Ad Costs=SUM(ad_costs), CAC=AVG(cac), ROI=AVG(roi), AOV=AVG(aov). Statuses: Vybavena, Vyzdvihnutá, Čaká na platbu, Stornovaná. Cities: Bratislava, Košice, Banská Bystrica, Prešov, Žilina, Trenčín, Trnava, Nitra.`
+// ─── System context builder ───────────────────────────────────────────────────
+
+// CUSTOMIZE: Replace with your app's page descriptions — map each route to a human-readable summary of what's on the page
+const PAGE_DESCRIPTIONS: Record<string, string> = {
+  '/': 'Overview — KPI cards (total revenue, total ad spend, ROAS, order count, avg order value) and a revenue vs ad-costs time-series chart.',
+  '/ads': 'Ad Performance — Google Ads campaign table (clicks, impressions, cost, sessions, conversions) and Meta Ads table (ad name, clicks, impressions, spend). Summary totals for each platform.',
+  '/orders': 'Orders — paginated order list (code, date, item, price, status, payment, city, country) with search and filter by status/payment.',
+  '/products': 'Products — product ranking by order count and total revenue.',
+  '/customers': 'Customers — geographic breakdown by city/country and payment method analysis.',
+  '/custom': 'My Dashboards — user-created charts pinned from KAI or built with the chart builder.',
 }
 
-function generateId(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
-  return Math.random().toString(36).slice(2) + Date.now().toString(36)
+function buildSystemContext(pathname: string): string {
+  const currentPage = PAGE_DESCRIPTIONS[pathname] ?? ''
+  // CUSTOMIZE: Replace the return value below with your app-specific system context.
+  // Include: app name, page descriptions, data table schemas, KPI formulas.
+  return `You are KAI, the AI assistant embedded in the "Ads & Sales Dashboard" Keboola data app.
+
+The user is currently viewing: ${currentPage || pathname || 'the app'}
+
+APP PAGES:
+- / (Overview): KPI cards and revenue vs ad-costs chart
+- /ads (Ad Performance): Google Ads campaigns and Meta Ads tables
+- /orders (Orders): Paginated order list with filters
+- /products (Products): Product ranking by revenue and order count
+- /customers (Customers): Geographic and payment breakdown
+- /custom (My Dashboards): User-created charts
+
+DATA TABLES:
+1. marketing_metrics (out.c-marketing_metrics.marketing_metrics)
+   Key columns: date, revenue, ad_costs, roas, sessions, conversions, impressions, clicks
+   Use for: KPI trends, revenue analysis, ROAS calculation, ad spend analysis
+
+2. orders (in.c-Shoptet-01K4YFRJC6VFPXWJW1WRJS98S0.orders)
+   Key columns: code, date, itemName, totalPriceWithVat, statusName, paymentForm, deliveryCity, deliveryCountryName
+   Use for: Order details, product-level analysis, geographic sales, payment analysis
+
+3. ga4_analytics (in.c-GoogleAnalytics-01K4YFRJC6VFPZP5D43KWNJ4VQ.raw_ad_analytics)
+   Key columns: campaign, clicks, impressions, cost, sessions, conversions
+   Use for: Google Ads campaign performance
+
+4. meta_insights (in.c-Meta-01K4YFRJC6VFPYSQVJ3F066WJQ.ad_costs_insights)
+   Key columns: ad_name, clicks, impressions, spend
+   Use for: Meta/Facebook ad performance
+
+KPI FORMULAS:
+- ROAS = Revenue / Ad Spend
+- Avg Order Value = Total Revenue / Order Count
+- CTR = Clicks / Impressions
+- CPC = Cost / Clicks
+
+Help the user explore their data by answering questions, creating visualizations, and providing insights.
+When showing data, prefer markdown tables. Always be concise and data-driven.`
 }
 
-export function KaiChatProvider({ children }: { children: React.ReactNode }) {
-  const [conversations, setConversations] = useState<Map<string, Conversation>>(new Map())
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
-  const [isOpen, setIsOpen] = useState(false)
-  const [isStreaming, setIsStreaming] = useState(false)
-  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+// ─── SSE event parser ────────────────────────────────────────────────────────
+//
+// CRITICAL: Polled events are RAW SSE text strings buffered by the backend,
+// including "data:" prefixes. Each event string may contain multiple lines.
+// We must split on \n, find "data:" lines, strip the prefix, and JSON.parse.
+//
 
-  const setOpen = useCallback((open: boolean) => setIsOpen(open), [])
-
-  const newConversation = useCallback(() => {
-    const id = generateId()
-    const conv: Conversation = { id, title: 'New conversation', messages: [] }
-    setConversations((prev) => new Map(prev).set(id, conv))
-    setActiveConversationId(id)
-  }, [])
-
-  const updateMessage = useCallback((convId: string, msgId: string, updates: Partial<ChatMessage>) => {
-    setConversations((prev) => {
-      const next = new Map(prev)
-      const conv = next.get(convId)
-      if (!conv) return prev
-      const msgs = conv.messages.map((m) => m.id === msgId ? { ...m, ...updates } : m)
-      next.set(convId, { ...conv, messages: msgs })
-      return next
-    })
-  }, [])
-
-  const addMessage = useCallback((convId: string, msg: ChatMessage) => {
-    setConversations((prev) => {
-      const next = new Map(prev)
-      const conv = next.get(convId)
-      if (!conv) return prev
-      const title = conv.messages.length === 0 && msg.role === 'user'
-        ? msg.content.slice(0, 40) + (msg.content.length > 40 ? '…' : '')
-        : conv.title
-      next.set(convId, { ...conv, title, messages: [...conv.messages, msg] })
-      return next
-    })
-  }, [])
-
-  const pollStream = useCallback(async (streamId: string, convId: string, assistantMsgId: string) => {
-    let cursor = 0
-    let done = false
-
-    const poll = async () => {
+function parseSSEEvent(raw: string): { type: string; [key: string]: any } | null {
+  const lines = raw.split('\n')
+  for (const line of lines) {
+    if (line.startsWith('data:')) {
+      const jsonStr = line.slice(5).trim()
+      if (!jsonStr || jsonStr === '[DONE]') return { type: '[DONE]' }
       try {
-        const res = await fetch(`/api/chat/${streamId}/poll?cursor=${cursor}`)
-        if (!res.ok) throw new Error(`Poll error ${res.status}`)
-        const body = await res.json()
-        const events: string[] = body.events ?? []
-        cursor = body.cursor ?? cursor
+        return JSON.parse(jsonStr)
+      } catch {
+        // Not valid JSON — might be a partial or non-JSON data line
+        return null
+      }
+    }
+  }
+  return null
+}
 
-        for (const rawEvent of events) {
-          const stripped = rawEvent.startsWith('data: ') ? rawEvent.slice(6) : rawEvent
-          try {
-            const parsed = JSON.parse(stripped)
-            if (parsed.type === 'text' && parsed.text) {
-              setConversations((prev) => {
-                const next = new Map(prev)
-                const conv = next.get(convId)
-                if (!conv) return prev
-                const msgs = conv.messages.map((m) =>
-                  m.id === assistantMsgId
-                    ? { ...m, content: m.content + parsed.text, isStreaming: true }
-                    : m
-                )
-                next.set(convId, { ...conv, messages: msgs })
-                return next
-              })
-            } else if (parsed.type === 'tool-approval-request') {
-              updateMessage(convId, assistantMsgId, {
-                isStreaming: false,
-                toolApproval: {
-                  approvalId: parsed.approval_id ?? parsed.approvalId,
-                  toolName: parsed.tool_name ?? parsed.toolName ?? 'tool',
-                },
-              })
-            } else if (parsed.type === 'finish' || parsed.type === 'error') {
-              done = true
-            }
-          } catch {
-            // not JSON, skip
-          }
+// ─── Polling client ───────────────────────────────────────────────────────────
+//
+// Polls GET /api/chat/{streamId}/poll?cursor=N for buffered SSE events.
+// Adaptive interval: 500ms when events received, 1500ms when idle.
+//
+
+interface SSECallbacks {
+  onDelta: (text: string) => void
+  onToolApproval: (approvalId: string, toolCallId: string, toolName?: string) => void
+  onToolCall: (toolCallId: string, state: string, toolName?: string, toolArgs?: string) => void
+}
+
+async function pollKaiStream(
+  streamId: string,
+  signal: AbortSignal,
+  callbacks: SSECallbacks,
+) {
+  let cursor = 0
+  let done = false
+  const toolNames = new Map<string, string>()
+
+  while (!done && !signal.aborted) {
+    try {
+      const res = await fetch(`/api/chat/${streamId}/poll?cursor=${cursor}`, { signal })
+      if (!res.ok) break
+      const json = await res.json()
+
+      const rawEvents: string[] = json.events ?? []
+      for (const rawEvent of rawEvents) {
+        if (signal.aborted) break
+
+        const parsed = parseSSEEvent(rawEvent)
+        if (!parsed) continue
+
+        const type = parsed.type
+
+        if (type === '[DONE]') {
+          done = true
+          break
         }
 
-        if (body.done || done) {
-          updateMessage(convId, assistantMsgId, { isStreaming: false })
-          setIsStreaming(false)
+        switch (type) {
+          case 'text-delta':
+            if (parsed.delta) callbacks.onDelta(parsed.delta)
+            break
+          case 'tool-input-start':
+          case 'tool-input-available': {
+            if (parsed.toolName && parsed.toolCallId) {
+              toolNames.set(parsed.toolCallId, parsed.toolName)
+            }
+            // Capture any args/input the event carries
+            const args = parsed.args ?? parsed.input ?? parsed.arguments
+            const argsStr = args ? (typeof args === 'string' ? args : JSON.stringify(args)) : undefined
+            callbacks.onToolCall(parsed.toolCallId, type, parsed.toolName, argsStr)
+            break
+          }
+          case 'tool-output-available':
+          case 'tool-call':
+            callbacks.onToolCall(parsed.toolCallId, parsed.state ?? type, toolNames.get(parsed.toolCallId))
+            break
+          case 'tool-approval-request':
+            callbacks.onToolApproval(
+              parsed.approvalId,
+              parsed.toolCallId,
+              toolNames.get(parsed.toolCallId) ?? parsed.toolName,
+            )
+            break
+        }
+      }
+
+      cursor = json.cursor ?? cursor + rawEvents.length
+      if (json.done) done = true
+
+      if (!done && !signal.aborted) {
+        await new Promise(r => setTimeout(r, rawEvents.length > 0 ? 500 : 1500))
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') break
+      break
+    }
+  }
+}
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
+export function KaiChatProvider({ children }: { children: ReactNode }) {
+  const [conversationId, setConversationId] = useState<string>(() => crypto.randomUUID())
+  const [messages, setMessages] = useState<KaiMessage[]>([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [conversations, setConversations] = useState<Conversation[]>(() => ChatStorage.list())
+
+  // Platform info (for Keboola table links in tool call chips)
+  const [connectionUrl, setConnectionUrl] = useState('')
+  const [projectId, setProjectId] = useState('')
+  useEffect(() => {
+    fetch('/api/platform').then(r => r.json()).then(data => {
+      setConnectionUrl(data.connection_url ?? '')
+      setProjectId(data.project_id ?? '')
+    }).catch(() => {})
+  }, [])
+
+  // Sheet/layout state
+  const [isOpen, setIsOpen] = useState(false)
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => {
+    if (typeof window === 'undefined') return 'sidebar'
+    return (localStorage.getItem('kai-layout-mode') as LayoutMode) || 'sidebar'
+  })
+
+  const toggleChat = useCallback(() => setIsOpen(prev => !prev), [])
+  const openChat = useCallback(() => setIsOpen(true), [])
+  const closeChat = useCallback(() => {
+    setIsOpen(false)
+    // Always reset to sidebar on close — fullscreen is only for explicit expand
+    setLayoutMode('sidebar')
+    localStorage.setItem('kai-layout-mode', 'sidebar')
+  }, [])
+  const expand = useCallback(() => {
+    setLayoutMode('fullscreen')
+    localStorage.setItem('kai-layout-mode', 'fullscreen')
+  }, [])
+  const collapse = useCallback(() => {
+    setLayoutMode('sidebar')
+    localStorage.setItem('kai-layout-mode', 'sidebar')
+  }, [])
+  const [toolCalls, setToolCalls] = useState<ToolCallState[]>([])
+
+  const abortRef = useRef<AbortController | null>(null)
+  const responseCache = useRef<Map<string, ResponseCache>>(new Map())
+  const isFirstMessage = useRef(true)
+  const chatIdRef = useRef<string>(conversationId)
+
+  const refreshConversations = useCallback(() => {
+    setConversations(ChatStorage.list())
+  }, [])
+
+  const addMessage = useCallback((msg: KaiMessage) => {
+    setMessages(prev => [...prev, msg])
+    ChatStorage.addMessage(chatIdRef.current, {
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      timestamp: Date.now(),
+    }, chatIdRef.current)
+  }, [])
+
+  const updateLastAssistant = useCallback((updater: (prev: string) => string) => {
+    setMessages(prev => {
+      const copy = [...prev]
+      const last = copy[copy.length - 1]
+      if (last?.role === 'assistant') {
+        copy[copy.length - 1] = { ...last, content: updater(last.content) }
+      }
+      return copy
+    })
+  }, [])
+
+  // Helper: start a KAI stream and poll it, accumulating text
+  const streamAndPoll = useCallback(async (
+    postUrl: string,
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<string> => {
+    const initRes = await fetch(postUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!initRes.ok) throw new Error(`Chat request failed: ${initRes.status}`)
+    const { stream_id } = await initRes.json()
+
+    let accumulatedText = ''
+    let displayedLength = 0
+    let revealTimer: ReturnType<typeof setInterval> | null = null
+
+    const startReveal = () => {
+      if (revealTimer !== null) return
+      revealTimer = setInterval(() => {
+        if (displayedLength >= accumulatedText.length) {
+          if (revealTimer !== null) { clearInterval(revealTimer); revealTimer = null }
           return
         }
+        const backlog = accumulatedText.length - displayedLength
+        const step = Math.max(2, Math.ceil(backlog * 0.15))
+        let newLen = Math.min(displayedLength + step, accumulatedText.length)
+        // Snap past any partially-revealed tool call marker
+        const searchFrom = newLen - 20 > 0 ? newLen - 20 : 0
+        const markerStart = accumulatedText.lastIndexOf('\u200B[tool:', searchFrom)
+        if (markerStart >= 0 && markerStart < newLen) {
+          const markerEnd = accumulatedText.indexOf(']\u200B', markerStart)
+          if (markerEnd >= 0 && newLen < markerEnd + 2) {
+            newLen = Math.min(markerEnd + 2, accumulatedText.length)
+          }
+        }
+        displayedLength = newLen
+        updateLastAssistant(() => accumulatedText.slice(0, displayedLength))
+      }, 30)
+    }
 
-        pollingRef.current = setTimeout(poll, 800)
-      } catch {
-        updateMessage(convId, assistantMsgId, { isStreaming: false, content: '(Connection error)' })
-        setIsStreaming(false)
+    await pollKaiStream(stream_id, signal, {
+      onDelta: (delta) => {
+        accumulatedText += delta
+        startReveal()
+      },
+      onToolApproval: (approvalId, toolCallId, toolName) => {
+        setMessages(prev => {
+          const copy = [...prev]
+          const last = copy[copy.length - 1]
+          if (last?.role === 'assistant') {
+            copy[copy.length - 1] = { ...last, toolApproval: { approvalId, toolCallId, toolName } }
+          }
+          return copy
+        })
+      },
+      onToolCall: (toolCallId, state, toolName, toolArgs) => {
+        // Inject marker into text stream when tool call first appears
+        if (state === 'tool-input-start' || state === 'tool-input-available') {
+          const marker = makeToolCallMarker(toolCallId)
+          if (!accumulatedText.includes(marker)) {
+            accumulatedText += marker
+            startReveal()
+          }
+        }
+        setToolCalls(prev => {
+          const derivedState: ToolCallState['state'] =
+            state.includes('output') || state === 'done' ? 'done'
+            : state === 'error' ? 'error'
+            : 'processing'
+          const idx = prev.findIndex(tc => tc.toolCallId === toolCallId)
+          if (idx >= 0) {
+            const updated = [...prev]
+            updated[idx] = {
+              ...updated[idx],
+              state: derivedState,
+              toolName: toolName ?? updated[idx].toolName,
+              toolArgs: toolArgs ?? updated[idx].toolArgs,
+            }
+            return updated
+          }
+          return [...prev, { toolCallId, toolName, toolArgs, state: derivedState }]
+        })
+      },
+    })
+
+    // Flush remaining buffered text
+    if (revealTimer !== null) clearInterval(revealTimer)
+    if (displayedLength < accumulatedText.length) {
+      updateLastAssistant(() => accumulatedText)
+    }
+
+    return accumulatedText
+  }, [updateLastAssistant])
+
+  const sendMessage = useCallback(async (text: string, bypassCache = false) => {
+    if (isStreaming) return
+
+    const cacheKey = text.toLowerCase().trim()
+    if (!bypassCache) {
+      const cached = responseCache.current.get(cacheKey)
+      if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+        const userMsg: KaiMessage = { id: crypto.randomUUID(), role: 'user', content: text }
+        const assistantMsg: KaiMessage = { id: crypto.randomUUID(), role: 'assistant', content: cached.text }
+        addMessage(userMsg)
+        addMessage(assistantMsg)
+        refreshConversations()
+        return
       }
     }
 
-    pollingRef.current = setTimeout(poll, 400)
-  }, [updateMessage])
-
-  const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || isStreaming) return
-
-    let convId = activeConversationId
-    if (!convId) {
-      convId = generateId()
-      const conv: Conversation = {
-        id: convId,
-        title: text.slice(0, 40) + (text.length > 40 ? '…' : ''),
-        messages: [],
-      }
-      setConversations((prev) => new Map(prev).set(convId!, conv))
-      setActiveConversationId(convId)
+    // Inject system context on first message, page context on every message
+    const pathname = typeof window !== 'undefined' ? window.location.pathname : '/'
+    let fullText: string
+    if (isFirstMessage.current) {
+      fullText = `${buildSystemContext(pathname)}\n\n${text}`
+      isFirstMessage.current = false
+    } else {
+      fullText = `[Current page: ${pathname}]\n\n${text}`
     }
 
-    const userMsgId = generateId()
-    const userMsg: ChatMessage = { id: userMsgId, role: 'user', content: text }
-    addMessage(convId, userMsg)
+    setToolCalls([])
+    const userMsg: KaiMessage = { id: crypto.randomUUID(), role: 'user', content: text }
+    addMessage(userMsg)
 
-    const assistantMsgId = generateId()
-    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', isStreaming: true }
-    addMessage(convId, assistantMsg)
+    const assistantMsgId = crypto.randomUUID()
+    const assistantMsg: KaiMessage = { id: assistantMsgId, role: 'assistant', content: '', streaming: true }
+    setMessages(prev => [...prev, assistantMsg])
 
+    abortRef.current = new AbortController()
     setIsStreaming(true)
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: convId,
+      const accumulatedText = await streamAndPoll(
+        '/api/chat',
+        {
+          id: chatIdRef.current,
           message: {
-            id: userMsgId,
+            id: crypto.randomUUID(),
             role: 'user',
-            parts: [{ type: 'text', text }],
+            parts: [{ type: 'text', text: fullText }],
           },
           selectedChatModel: 'chat-model',
           selectedVisibilityType: 'private',
-          systemContext: buildSystemContext(),
-        }),
+        },
+        abortRef.current.signal,
+      )
+
+      // Finalize
+      const storageContent = stripToolMarkers(accumulatedText)
+      setMessages(prev => {
+        const copy = [...prev]
+        const last = copy[copy.length - 1]
+        if (last?.role === 'assistant') {
+          copy[copy.length - 1] = { ...last, content: accumulatedText, streaming: false }
+          ChatStorage.addMessage(chatIdRef.current, {
+            id: last.id,
+            role: 'assistant',
+            content: storageContent,
+            timestamp: Date.now(),
+          }, chatIdRef.current)
+        }
+        return copy
       })
 
-      if (!res.ok) throw new Error(`Chat error ${res.status}`)
-      const { stream_id } = await res.json()
-      await pollStream(stream_id, convId, assistantMsgId)
-    } catch {
-      updateMessage(convId, assistantMsgId, {
-        isStreaming: false,
-        content: 'Sorry, I encountered an error. Please try again.',
-      })
+      if (accumulatedText) {
+        responseCache.current.set(cacheKey, { text: accumulatedText, timestamp: Date.now() })
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        updateLastAssistant(() => 'Sorry, something went wrong. Please try again.')
+      }
+    } finally {
       setIsStreaming(false)
+      abortRef.current = null
+      refreshConversations()
     }
-  }, [activeConversationId, isStreaming, addMessage, pollStream, updateMessage])
+  }, [isStreaming, addMessage, updateLastAssistant, refreshConversations, streamAndPoll])
 
-  const approveToolCall = useCallback(async (chatId: string, approvalId: string) => {
-    const convId = activeConversationId ?? chatId
-    const assistantMsgId = generateId()
-    addMessage(convId, { id: assistantMsgId, role: 'assistant', content: '', isStreaming: true })
+  const handleApproval = useCallback(async (approved: boolean, approvalId: string) => {
+    const toolApprovalMsg = messages.find(m => m.toolApproval?.approvalId === approvalId)
+    if (!toolApprovalMsg?.toolApproval) return
+
+    // Clear the approval UI immediately
+    setMessages(prev =>
+      prev.map(m =>
+        m.id === toolApprovalMsg.id ? { ...m, toolApproval: undefined } : m
+      )
+    )
+
+    // Add a new streaming assistant message for the approval response
+    const assistantMsgId = crypto.randomUUID()
+    setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', streaming: true }])
+
+    abortRef.current = new AbortController()
     setIsStreaming(true)
-    try {
-      const res = await fetch(`/api/chat/${chatId}/approve/${approvalId}`, { method: 'POST' })
-      if (!res.ok) throw new Error(`Approve error ${res.status}`)
-      const { stream_id } = await res.json()
-      await pollStream(stream_id, convId, assistantMsgId)
-    } catch {
-      updateMessage(convId, assistantMsgId, { isStreaming: false, content: '(Error approving tool call)' })
-      setIsStreaming(false)
-    }
-  }, [activeConversationId, addMessage, pollStream, updateMessage])
 
-  const denyToolCall = useCallback(async (chatId: string, approvalId: string) => {
     try {
-      await fetch(`/api/chat/${chatId}/deny/${approvalId}`, { method: 'POST' })
-    } catch { /* ignore */ }
+      const action = approved ? 'approve' : 'reject'
+      // POST to the approval endpoint — it returns a NEW stream_id
+      // that we MUST poll to get KAI's response after tool execution
+      const accumulatedText = await streamAndPoll(
+        `/api/chat/${chatIdRef.current}/${action}/${approvalId}`,
+        { approved, ...(!approved ? { reason: 'User denied' } : {}) },
+        abortRef.current.signal,
+      )
+
+      // Finalize the assistant message
+      const storageContent = stripToolMarkers(accumulatedText)
+      setMessages(prev => {
+        const copy = [...prev]
+        const last = copy[copy.length - 1]
+        if (last?.role === 'assistant') {
+          copy[copy.length - 1] = { ...last, content: accumulatedText, streaming: false }
+          ChatStorage.addMessage(chatIdRef.current, {
+            id: last.id,
+            role: 'assistant',
+            content: storageContent,
+            timestamp: Date.now(),
+          }, chatIdRef.current)
+        }
+        return copy
+      })
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        updateLastAssistant(() => 'Sorry, tool approval failed. Please try again.')
+      }
+    } finally {
+      setIsStreaming(false)
+      abortRef.current = null
+      refreshConversations()
+    }
+  }, [messages, updateLastAssistant, refreshConversations, streamAndPoll])
+
+  const abortStreaming = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setIsStreaming(false)
+    // Remove empty assistant message if no content was accumulated
+    setMessages(prev => {
+      const last = prev[prev.length - 1]
+      if (last?.role === 'assistant' && !last.content) {
+        return prev.slice(0, -1)
+      }
+      return prev.map(m => m.streaming ? { ...m, streaming: false } : m)
+    })
   }, [])
 
+  const startNewConversation = useCallback(() => {
+    const id = crypto.randomUUID()
+    chatIdRef.current = id
+    setConversationId(id)
+    setMessages([])
+    setToolCalls([])
+    isFirstMessage.current = true
+    refreshConversations()
+  }, [refreshConversations])
+
+  const loadConversation = useCallback((id: string) => {
+    const conv = ChatStorage.get(id)
+    if (!conv) return
+    // Restore chatId from the persisted conversation — critical for KAI context continuity
+    chatIdRef.current = conv.chatId ?? id
+    setConversationId(id)
+    setMessages(
+      conv.messages.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+      }))
+    )
+    isFirstMessage.current = false
+  }, [])
+
+  const deleteConversation = useCallback((id: string) => {
+    ChatStorage.delete(id)
+    if (id === chatIdRef.current) startNewConversation()
+    else refreshConversations()
+  }, [startNewConversation, refreshConversations])
+
   return (
-    <KaiChatContext.Provider value={{
-      conversations,
-      activeConversationId,
-      isOpen,
-      isStreaming,
-      setOpen,
-      sendMessage,
-      newConversation,
-      approveToolCall,
-      denyToolCall,
-    }}>
+    <KaiChatContext.Provider
+      value={{
+        messages,
+        isStreaming,
+        conversationId,
+        conversations,
+        toolCalls,
+        connectionUrl,
+        projectId,
+        isOpen,
+        layoutMode,
+        toggleChat,
+        openChat,
+        closeChat,
+        expand,
+        collapse,
+        sendMessage,
+        handleApproval,
+        abortStreaming,
+        startNewConversation,
+        loadConversation,
+        deleteConversation,
+      }}
+    >
       {children}
     </KaiChatContext.Provider>
   )

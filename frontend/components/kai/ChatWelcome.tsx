@@ -1,35 +1,91 @@
 'use client'
 
-import { useKaiChat } from '@/lib/kai-context'
-import { Sparkles } from 'lucide-react'
+/**
+ * KAI Client — ChatWelcome
+ * Source: keboola/kai-client/kai-nextjs/
+ * Copy verbatim. Only modify lines marked // CUSTOMIZE:
+ */
 
+import { BarChart2, Users, Clock } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import ChatInput from './ChatInput'
+
+// ─── Starter prompts ──────────────────────────────────────────────────────────
+
+// CUSTOMIZE: Replace these starter prompts with queries relevant to your app's domain
 const STARTER_PROMPTS = [
-  "What's our total revenue this month?",
-  "Compare Google vs Meta ad performance",
-  "Which products generate the most revenue?",
+  {
+    label: 'Ad performance',
+    prompt: 'Compare Google Ads vs Meta Ads performance — which platform has better ROAS?',
+    icon: BarChart2,
+  },
+  {
+    label: 'Revenue trends',
+    prompt: 'Show me monthly revenue and ad spend trends for the last 6 months.',
+    icon: Clock,
+  },
+  {
+    label: 'Top products',
+    prompt: 'Which products generate the most revenue and how many orders do they have?',
+    icon: Users,
+  },
 ]
 
-export default function ChatWelcome() {
-  const { sendMessage } = useKaiChat()
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ChatWelcomeProps {
+  onSend: (text: string) => void
+  prompt?: string
+  onPromptChange?: (value: string) => void
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function ChatWelcome({ onSend, prompt = '', onPromptChange }: ChatWelcomeProps) {
+  const handlePromptClick = (text: string) => {
+    onSend(text)
+  }
+
   return (
-    <div className="flex flex-col items-center px-4 py-8 text-center">
-      <div className="w-12 h-12 rounded-full bg-brand-primary/10 flex items-center justify-center mb-4">
-        <Sparkles size={22} className="text-brand-primary" />
+    <div className="flex flex-col items-center gap-10 text-center max-w-[600px] w-full">
+      {/* Heading */}
+      <div className="flex flex-col items-center gap-2">
+        <h1 className="text-2xl font-bold text-brand-secondary">
+          Welcome to Kai! 🎉
+        </h1>
+        <p className="text-sm text-gray-500 max-w-[420px]">
+          Your AI assistant for data exploration. Ask anything about your data.
+        </p>
       </div>
-      <h3 className="text-sm font-semibold text-brand-secondary mb-1">KAI Assistant</h3>
-      <p className="text-xs text-slate-500 mb-6 max-w-[240px]">
-        Ask questions about your ads, sales, and customer data.
-      </p>
-      <div className="w-full space-y-2">
-        {STARTER_PROMPTS.map((prompt) => (
+
+      {/* Input */}
+      <div className="w-full">
+        <ChatInput
+          value={prompt}
+          onValueChange={onPromptChange ?? (() => {})}
+          onSend={onSend}
+          onStop={() => {}}
+          status="ready"
+          placeholder="Ask a question about your data..."
+        />
+      </div>
+
+      {/* Starter prompts */}
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        {STARTER_PROMPTS.map(({ label, prompt: p, icon: Icon }) => (
           <button
-            key={prompt}
-            onClick={() => sendMessage(prompt)}
-            className="w-full text-left px-3 py-2.5 rounded-lg border border-border text-xs text-brand-secondary
-              hover:border-brand-primary/40 hover:bg-brand-primary/5 hover:text-brand-primary
-              transition-all duration-150"
+            key={label}
+            type="button"
+            onClick={() => handlePromptClick(p)}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border',
+              'bg-white text-sm text-brand-secondary font-medium',
+              'hover:border-brand-primary/40 hover:bg-brand-primary/5 hover:text-brand-primary',
+              'transition-all duration-150 shadow-sm',
+            )}
           >
-            {prompt}
+            <Icon size={15} className="text-brand-primary shrink-0" />
+            <span>{label}</span>
           </button>
         ))}
       </div>

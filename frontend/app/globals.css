@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @source "../app/**/*.{ts,tsx}";
 @source "../components/**/*.{ts,tsx}";
@@ -167,3 +168,6 @@ nav.glass {
 
 /* ─── Main content above aurora ─────────────────────────────────────────── */
 main { position: relative; z-index: 1; }
+
+/* ─── KAI Sheet & Chat CSS ──────────────────────────────────────────────── */
+@import "../css/kai-sheet.css";

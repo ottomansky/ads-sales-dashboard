@@ -1,67 +1,127 @@
 'use client'
 
-import { useState, useRef, KeyboardEvent } from 'react'
-import { useKaiChat } from '@/lib/kai-context'
-import { Send } from 'lucide-react'
+/**
+ * KAI Client — ChatInput
+ * Source: keboola/kai-client/kai-nextjs/
+ * Copy verbatim. Only modify lines marked // CUSTOMIZE:
+ */
 
-export default function ChatInput() {
-  const { sendMessage, isStreaming } = useKaiChat()
-  const [text, setText] = useState('')
+import { useRef, useEffect } from 'react'
+import { Send, Square, Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type InputStatus = 'ready' | 'submitted' | 'streaming'
+
+interface ChatInputProps {
+  value: string
+  onValueChange: (value: string) => void
+  onSend: (text: string) => void
+  onStop: () => void
+  status: InputStatus
+  disabled?: boolean
+  placeholder?: string
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function ChatInput({
+  value,
+  onValueChange,
+  onSend,
+  onStop,
+  status,
+  disabled = false,
+  placeholder = 'Send a message...',
+}: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const handleSubmit = () => {
-    const trimmed = text.trim()
-    if (!trimmed || isStreaming) return
-    sendMessage(trimmed)
-    setText('')
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
-  }
+  // Auto-focus on mount
+  useEffect(() => {
+    textareaRef.current?.focus()
+  }, [])
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const isReady = status === 'ready'
+  const isSubmitted = status === 'submitted'
+  const isStreaming = status === 'streaming'
+
+  const canSend = isReady && value.trim().length > 0 && !disabled
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSubmit()
+      if (canSend) {
+        onSend(value.trim())
+      }
     }
   }
 
-  const handleInput = () => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+  const handleActionClick = () => {
+    if (isReady && canSend) {
+      onSend(value.trim())
+    } else if (isStreaming) {
+      onStop()
+    }
+    // submitted: no-op (can't stop)
   }
 
   return (
-    <div className="flex items-end gap-2 p-3 border-t border-border bg-white">
+    <div
+      className={cn(
+        'flex flex-col gap-2 rounded-xl border border-border bg-white',
+        'shadow-sm transition-shadow duration-150',
+        'focus-within:border-brand-primary/50 focus-within:shadow-md',
+      )}
+    >
+      {/* Textarea */}
       <textarea
         ref={textareaRef}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        value={value}
+        onChange={e => onValueChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        onInput={handleInput}
-        placeholder={isStreaming ? 'KAI is thinking…' : 'Ask KAI anything…'}
-        disabled={isStreaming}
-        rows={1}
-        className="flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-2
-          text-sm text-brand-secondary placeholder:text-slate-400
-          focus:outline-none focus:border-brand-primary/50 focus:ring-1 focus:ring-brand-primary/20
-          disabled:opacity-60 disabled:cursor-not-allowed
-          transition-all duration-150"
-        style={{ minHeight: 38, maxHeight: 140 }}
+        placeholder={placeholder}
+        disabled={disabled || isSubmitted}
+        rows={2}
+        className={cn(
+          'kai-textarea w-full px-4 pt-3 pb-1',
+          'text-sm text-brand-secondary placeholder:text-gray-400',
+          'bg-transparent outline-none resize-none',
+          'leading-relaxed',
+        )}
       />
-      <button
-        onClick={handleSubmit}
-        disabled={!text.trim() || isStreaming}
-        className="w-9 h-9 flex items-center justify-center rounded-xl
-          bg-brand-primary text-white
-          disabled:opacity-40 disabled:cursor-not-allowed
-          hover:bg-brand-secondary transition-colors duration-150 shrink-0"
-        title="Send (Enter)"
-      >
-        <Send size={15} />
-      </button>
+
+      {/* Bottom row: action button */}
+      <div className="flex items-center justify-end px-3 pb-2">
+        <button
+          type="button"
+          onClick={handleActionClick}
+          disabled={isReady ? !canSend : isSubmitted}
+          aria-label={
+            isStreaming ? 'Stop generating' : isSubmitted ? 'Sending…' : 'Send message'
+          }
+          className={cn(
+            'flex items-center justify-center w-8 h-8 rounded-lg',
+            'transition-all duration-150',
+            // Ready + can send
+            canSend && isReady && 'bg-brand-primary text-white hover:bg-brand-primary/90',
+            // Ready but empty
+            isReady && !canSend && 'bg-gray-100 text-gray-300 cursor-not-allowed',
+            // Submitted — spinner, disabled
+            isSubmitted && 'bg-gray-100 text-gray-400 cursor-not-allowed',
+            // Streaming — stop button
+            isStreaming && 'bg-brand-primary text-white hover:bg-brand-primary/90',
+          )}
+        >
+          {isSubmitted ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : isStreaming ? (
+            <Square size={14} />
+          ) : (
+            <Send size={14} />
+          )}
+        </button>
+      </div>
     </div>
   )
 }

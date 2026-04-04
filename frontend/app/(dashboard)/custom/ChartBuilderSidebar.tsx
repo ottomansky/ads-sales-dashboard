@@ -1,5 +1,18 @@
 'use client'
 
+/**
+ * KAI Client -- ChartBuilderSidebar
+ * Source: keboola/kai-client/kai-nextjs/
+ * Copy verbatim. Only modify lines marked // CUSTOMIZE:
+ *
+ * Required consumer-app files (not in kai-nextjs template):
+ * - @/lib/api — useDataSchema, useQueryData hooks
+ * - @/lib/constants — COLORS.brandPrimary and COLORS.chart for chart palette
+ * - @/lib/chart-utils — buildOption, TYPES, ChartType
+ * - @/lib/chart-config-storage — saveConfig, updateConfig, deleteConfig, useChartLibrary, getLibrary, ChartConfig, DataSource, Period
+ * - @/lib/dashboard-storage — addDynamicChart
+ */
+
 import { useState, useMemo, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import ReactECharts from 'echarts-for-react'
@@ -19,14 +32,18 @@ import DraggableField from './chart-builder/DraggableField'
 import type { WellField } from './chart-builder/DraggableField'
 import FieldWell from './chart-builder/FieldWell'
 
-const SOURCE_LABELS: Record<DataSource, string> = {
-  marketing_metrics: 'Marketing',
-  orders: 'Orders',
-  ga4_analytics: 'Google Ads',
-  meta_insights: 'Meta Ads',
-}
+// -- Constants ----
 
-const SOURCE_BADGE_COLORS: Record<DataSource, string> = {
+// CUSTOMIZE: DataSource type definition (in chart-config-storage.ts)
+export type DataSource_Ref = DataSource
+
+const SOURCE_LABELS: Record<string, string> = { // CUSTOMIZE: Map data source keys to display labels
+  marketing_metrics: 'Marketing Metrics',
+  orders: 'Orders',
+  ga4_analytics: 'GA4 Analytics',
+  meta_insights: 'Meta Insights',
+}
+const SOURCE_BADGE_COLORS: Record<string, string> = { // CUSTOMIZE: Map data source keys to badge colors
   marketing_metrics: '#097cf7',
   orders: '#22c55e',
   ga4_analytics: '#f59e0b',
@@ -41,6 +58,8 @@ const PERIOD_OPTIONS: { value: Period | 'all'; label: string }[] = [
   { value: '12M', label: 'Last 12 months' },
 ]
 
+// -- Props ----
+
 export type SidebarMode = 'new' | 'edit' | 'library'
 
 interface Props {
@@ -52,25 +71,32 @@ interface Props {
   onEditConfig: (configId: string) => void
 }
 
+// -- Component ----
+
 export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, onClose, onSwitchMode, onEditConfig }: Props) {
   const { data: schema } = useDataSchema()
   const configs = useChartLibrary()
 
-  const [source, setSource] = useState<DataSource>('marketing_metrics')
+  // -- Draft state --
+  const [source, setSource] = useState<DataSource>('marketing_metrics' as DataSource) // CUSTOMIZE: Set default source
   const [axisField, setAxisField] = useState<WellField | null>(null)
   const [valuesFields, setValuesFields] = useState<WellField[]>([])
   const [period, setPeriod] = useState<Period | null>('L6M')
   const [chartType, setChartType] = useState<ChartType>('bar')
   const [name, setName] = useState('')
   const [saved, setSaved] = useState(false)
+
+  // -- DnD state --
   const [activeDragField, setActiveDragField] = useState<WellField | null>(null)
   const [, setHoveredWell] = useState<string | null>(null)
 
+  // -- Sensors --
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
+  // -- Populate draft from editing config --
   useEffect(() => {
     if (mode === 'edit' && editingConfigId) {
       const config = getLibrary().configs.find((c) => c.id === editingConfigId)
@@ -103,9 +129,11 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, editingConfigId, schema])
 
+  // -- Source schema --
   const sourceSchema = schema?.sources.find((s) => s.id === source)
   const supportsPeriod = sourceSchema?.supports_period ?? false
 
+  // -- Auto-populate axis when source has single dimension --
   function autoPopulateAxis(src: DataSource) {
     const srcSchema = schema?.sources.find((s) => s.id === src)
     if (srcSchema && srcSchema.dimensions.length === 1) {
@@ -114,6 +142,7 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
     }
   }
 
+  // -- Build fields list --
   const fields: WellField[] = useMemo(() => {
     if (!sourceSchema) return []
     const dims: WellField[] = sourceSchema.dimensions.map((d) => ({ column: d.column, label: d.label, role: 'dimension' }))
@@ -123,14 +152,18 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
 
   const usedColumns = new Set([axisField?.column, ...valuesFields.map((f) => f.column)].filter(Boolean))
 
+  // -- Source change --
   const handleSourceChange = (newSource: DataSource) => {
     setSource(newSource)
     setAxisField(null)
     setValuesFields([])
-    if (!schema?.sources.find((s) => s.id === newSource)?.supports_period) setPeriod(null)
+    if (!schema?.sources.find((s) => s.id === newSource)?.supports_period) {
+      setPeriod(null)
+    }
     autoPopulateAxis(newSource)
   }
 
+  // -- Click-to-add --
   const handleFieldClick = (field: WellField) => {
     if (field.role === 'dimension') {
       setAxisField(field)
@@ -139,6 +172,7 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
     }
   }
 
+  // -- DnD handlers --
   function handleDragStart(event: DragStartEvent) {
     const data = event.active.data.current as { field: WellField } | undefined
     setActiveDragField(data?.field ?? null)
@@ -166,7 +200,7 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
       if (activeData.field.role === 'dimension') setAxisField(activeData.field)
       return
     }
-    if (activeData.origin === 'source' && overId.startsWith('well::values')) {
+    if (activeData.origin === 'source' && (overId.startsWith('well::values'))) {
       if (activeData.field.role === 'measure') {
         setValuesFields((prev) => (prev.some((f) => f.column === activeData.field.column) ? prev : [...prev, activeData.field]))
       }
@@ -181,6 +215,7 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
     }
   }
 
+  // -- Live preview --
   const previewConfig = useMemo((): ChartConfig | null => {
     if (!source || !axisField || valuesFields.length === 0) return null
     return {
@@ -202,6 +237,7 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
     return buildOption(queryData.headers, queryData.rows, chartType, false)
   }, [queryData, chartType])
 
+  // -- Auto-generate name --
   useEffect(() => {
     if (mode === 'new' && !name && axisField && valuesFields.length > 0) {
       const measureNames = valuesFields.slice(0, 2).map((f) => f.label).join(', ')
@@ -209,6 +245,7 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
     }
   }, [axisField, valuesFields, mode, name])
 
+  // -- Save --
   const canSave = axisField !== null && valuesFields.length > 0 && name.trim() !== ''
 
   const handleSave = () => {
@@ -231,8 +268,15 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
     setTimeout(onClose, 400)
   }
 
-  const handleLibraryAdd = (configId: string) => addDynamicChart(configId, activeId)
-  const handleLibraryEdit = (configId: string) => onEditConfig(configId)
+  // -- Library actions --
+  const handleLibraryAdd = (configId: string) => {
+    addDynamicChart(configId, activeId)
+  }
+
+  const handleLibraryEdit = (configId: string) => {
+    onEditConfig(configId)
+  }
+
   const isBuilder = mode === 'new' || mode === 'edit'
 
   return (
@@ -242,47 +286,61 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
       exit={{ x: 340 }}
       transition={{ type: 'spring', stiffness: 320, damping: 30 }}
       style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 320, zIndex: 50,
-        background: '#fff', borderLeft: '1px solid #e2e8f0',
+        position: 'fixed',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        width: 320,
+        zIndex: 50,
+        background: '#fff',
+        borderLeft: '1px solid #e2e8f0',
         boxShadow: '-4px 0 20px rgba(0,0,0,0.08)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
       {/* Header */}
       <div style={{ padding: '14px 16px', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0b1f3a', margin: 0 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#002151', margin: 0 }}>
             {mode === 'edit' ? 'Edit Chart' : mode === 'library' ? 'Chart Library' : 'Build Chart'}
           </h3>
           <button onClick={onClose} style={{ color: '#94a3b8', cursor: 'pointer', padding: 2 }}><X size={16} /></button>
         </div>
+        {/* Tab toggle */}
         <div style={{ display: 'flex', gap: 4, background: '#f1f5f9', borderRadius: 6, padding: 2 }}>
           <button
             onClick={() => onSwitchMode(mode === 'edit' ? 'edit' : 'new')}
             style={{
               flex: 1, padding: '5px 0', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: 'none',
               background: isBuilder ? '#fff' : 'transparent',
-              color: isBuilder ? '#0b1f3a' : '#64748b',
+              color: isBuilder ? '#002151' : '#64748b',
               boxShadow: isBuilder ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
               transition: 'all 150ms',
             }}
-          >Builder</button>
+          >
+            Builder
+          </button>
           <button
             onClick={() => onSwitchMode('library')}
             style={{
               flex: 1, padding: '5px 0', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: 'none',
               background: mode === 'library' ? '#fff' : 'transparent',
-              color: mode === 'library' ? '#0b1f3a' : '#64748b',
+              color: mode === 'library' ? '#002151' : '#64748b',
               boxShadow: mode === 'library' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
               transition: 'all 150ms',
             }}
-          >Library ({configs.length})</button>
+          >
+            Library ({configs.length})
+          </button>
         </div>
       </div>
 
       {/* Scrollable content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
         {mode === 'library' ? (
+          /* -- Library Tab -- */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {configs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 16px', color: '#94a3b8' }}>
@@ -290,41 +348,53 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
                 <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 2 }}>No saved charts</p>
                 <p style={{ fontSize: 11 }}>Use the Builder tab to create one</p>
               </div>
-            ) : configs.map((config) => (
-              <div key={config.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px', background: '#fff' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#0b1f3a', flex: 1 }}>{config.name}</span>
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, whiteSpace: 'nowrap', flexShrink: 0,
-                    background: SOURCE_BADGE_COLORS[config.source] + '18',
-                    color: SOURCE_BADGE_COLORS[config.source],
-                  }}>
-                    {SOURCE_LABELS[config.source].split(' ')[0]}
-                  </span>
+            ) : (
+              configs.map((config) => (
+                <div
+                  key={config.id}
+                  style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px', background: '#fff' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#002151', flex: 1 }}>{config.name}</span>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, whiteSpace: 'nowrap', flexShrink: 0,
+                      background: SOURCE_BADGE_COLORS[config.source] + '18',
+                      color: SOURCE_BADGE_COLORS[config.source],
+                    }}>
+                      {SOURCE_LABELS[config.source].split(' ')[0]}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8, lineHeight: 1.5 }}>
+                    {config.chartType.replace('-', ' ')} · {config.measures.slice(0, 2).join(', ')}
+                    {config.measures.length > 2 && ` +${config.measures.length - 2}`}
+                    {config.period && ` · ${config.period}`}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      onClick={() => handleLibraryAdd(config.id)}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 8px', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: COLORS.brandPrimary, color: '#fff', border: 'none' }}
+                    >
+                      <Plus size={12} /> Add
+                    </button>
+                    <button
+                      onClick={() => handleLibraryEdit(config.id)}
+                      style={{ padding: '5px 7px', borderRadius: 5, cursor: 'pointer', background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center' }}
+                    >
+                      <Pencil size={12} />
+                    </button>
+                    <button
+                      onClick={() => deleteConfig(config.id)}
+                      style={{ padding: '5px 7px', borderRadius: 5, cursor: 'pointer', background: '#fff1f1', color: '#dc2626', border: '1px solid #fecaca', display: 'flex', alignItems: 'center' }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8, lineHeight: 1.5 }}>
-                  {config.chartType.replace('-', ' ')} · {config.measures.slice(0, 2).join(', ')}
-                  {config.measures.length > 2 && ` +${config.measures.length - 2}`}
-                  {config.period && ` · ${config.period}`}
-                </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button onClick={() => handleLibraryAdd(config.id)}
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 8px', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: COLORS.brandPrimary, color: '#fff', border: 'none' }}>
-                    <Plus size={12} /> Add
-                  </button>
-                  <button onClick={() => handleLibraryEdit(config.id)}
-                    style={{ padding: '5px 7px', borderRadius: 5, cursor: 'pointer', background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center' }}>
-                    <Pencil size={12} />
-                  </button>
-                  <button onClick={() => deleteConfig(config.id)}
-                    style={{ padding: '5px 7px', borderRadius: 5, cursor: 'pointer', background: '#fff1f1', color: '#dc2626', border: '1px solid #fecaca', display: 'flex', alignItems: 'center' }}>
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         ) : (
+          /* -- Builder Tab -- */
           <DndContext
             id="field-wells-dnd"
             sensors={sensors}
@@ -335,11 +405,13 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
           >
             {/* Source selector */}
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Data Source</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                Data Source
+              </div>
               <select
                 value={source}
                 onChange={(e) => handleSourceChange(e.target.value as DataSource)}
-                style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, color: '#0b1f3a', background: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, color: '#002151', background: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}
               >
                 {(Object.keys(SOURCE_LABELS) as DataSource[]).map((s) => (
                   <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
@@ -347,22 +419,49 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
               </select>
             </div>
 
-            {/* Fields */}
+            {/* Fields list */}
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Fields</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                Fields
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {fields.map((f) => (
-                  <DraggableField key={f.column} field={f} isUsed={usedColumns.has(f.column)} onClick={() => handleFieldClick(f)} />
+                  <DraggableField
+                    key={f.column}
+                    field={f}
+                    isUsed={usedColumns.has(f.column)}
+                    onClick={() => handleFieldClick(f)}
+                  />
                 ))}
               </div>
             </div>
 
-            <FieldWell wellName="axis" label="Axis (X)" items={axisField ? [axisField] : []} onRemove={() => setAxisField(null)} acceptsRole="dimension" placeholder="Drag a dimension here" />
-            <FieldWell wellName="values" label="Values (Y)" items={valuesFields} onRemove={(col) => setValuesFields((prev) => prev.filter((f) => f.column !== col))} acceptsRole="measure" placeholder="Drag measures here" />
+            {/* Wells */}
+            <FieldWell
+              wellName="axis"
+              label="Axis (X)"
+              items={axisField ? [axisField] : []}
+              onRemove={() => setAxisField(null)}
+              acceptsRole="dimension"
+              placeholder="Drag a dimension here"
+            />
+            <FieldWell
+              wellName="values"
+              label="Values (Y)"
+              items={valuesFields}
+              onRemove={(col) => setValuesFields((prev) => prev.filter((f) => f.column !== col))}
+              acceptsRole="measure"
+              placeholder="Drag measures here"
+            />
 
+            {/* Drag overlay */}
             <DragOverlay style={{ zIndex: 55 }}>
               {activeDragField ? (
-                <div style={{ padding: '5px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: '#097cf7', color: '#fff', boxShadow: '0 4px 12px rgba(9,124,247,0.3)', whiteSpace: 'nowrap' }}>
+                <div style={{
+                  padding: '5px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+                  background: '#097cf7', color: '#fff', boxShadow: '0 4px 12px rgba(9,124,247,0.3)',
+                  whiteSpace: 'nowrap',
+                }}>
                   {activeDragField.label}
                 </div>
               ) : null}
@@ -370,13 +469,17 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
           </DndContext>
         )}
 
-        {/* Chart type */}
+        {/* Chart type (builder only) */}
         {isBuilder && (
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Chart Type</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Chart Type
+            </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {TYPES.map((t) => (
-                <button key={t} onClick={() => setChartType(t as ChartType)}
+                <button
+                  key={t}
+                  onClick={() => setChartType(t as ChartType)}
                   style={{
                     padding: '4px 9px', borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: 'pointer',
                     background: chartType === t ? COLORS.brandPrimary : '#f8fafc',
@@ -392,14 +495,16 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
           </div>
         )}
 
-        {/* Period */}
+        {/* Period (builder only, when supported) */}
         {isBuilder && supportsPeriod && (
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Period</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Period
+            </div>
             <select
               value={period ?? 'all'}
               onChange={(e) => setPeriod(e.target.value === 'all' ? null : (e.target.value as Period))}
-              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, color: '#0b1f3a', background: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}
+              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, color: '#002151', background: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               {PERIOD_OPTIONS.map((p) => (
                 <option key={p.value} value={p.value}>{p.label}</option>
@@ -408,10 +513,12 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
           </div>
         )}
 
-        {/* Preview */}
+        {/* Mini preview (builder only) */}
         {isBuilder && (
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Preview</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Preview
+            </div>
             <div style={{ height: 180, border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', background: '#fafbfc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {isFetching && !queryData ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', fontSize: 11 }}>
@@ -428,35 +535,42 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
           </div>
         )}
 
-        {/* Name */}
+        {/* Name input (builder only) */}
         {isBuilder && (
           <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Chart Name</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Chart Name
+            </div>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && canSave) handleSave() }}
               placeholder="e.g. Revenue by Month"
-              style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, color: '#0b1f3a', background: '#fff', fontFamily: 'inherit', boxSizing: 'border-box', outline: 'none' }}
+              style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, color: '#002151', background: '#fff', fontFamily: 'inherit', boxSizing: 'border-box', outline: 'none' }}
             />
           </div>
         )}
       </div>
 
-      {/* Footer */}
+      {/* Footer (builder only) */}
       {isBuilder && (
         <div style={{ padding: '12px 16px', borderTop: '1px solid #e2e8f0', display: 'flex', gap: 8, flexShrink: 0 }}>
-          <button onClick={onClose}
-            style={{ flex: 1, padding: '7px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0' }}>
+          <button
+            onClick={onClose}
+            style={{ flex: 1, padding: '7px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0' }}
+          >
             Cancel
           </button>
-          <button onClick={handleSave} disabled={!canSave || saved}
+          <button
+            onClick={handleSave}
+            disabled={!canSave || saved}
             style={{
               flex: 1, padding: '7px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: canSave ? 'pointer' : 'not-allowed', border: 'none',
-              background: saved ? '#22c55e' : canSave ? COLORS.brandPrimary : '#e2e8f0',
+              background: saved ? '#16a34a' : canSave ? COLORS.brandPrimary : '#e2e8f0',
               color: canSave || saved ? '#fff' : '#94a3b8',
               transition: 'all 150ms',
-            }}>
+            }}
+          >
             {saved ? 'Saved!' : mode === 'edit' ? 'Update' : 'Save & Add'}
           </button>
         </div>

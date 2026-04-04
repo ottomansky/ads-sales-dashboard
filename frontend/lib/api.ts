@@ -121,6 +121,16 @@ export function useCustomers(period: string) {
   })
 }
 
+// ─── Custom Dashboard data hook ──────────────────────────────────────────────
+
+export function useCustomDashboardData() {
+  return useQuery({
+    queryKey: ['custom-dashboard-data'],
+    queryFn: () => apiFetch('/api/health'),
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
 // ─── My Dashboards hooks ─────────────────────────────────────────────────────
 
 export function useDataSchema() {

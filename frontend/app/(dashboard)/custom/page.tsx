@@ -1,17 +1,29 @@
 'use client'
 
+/**
+ * KAI Client -- Custom Dashboard Page
+ * Source: keboola/kai-client/kai-nextjs/
+ * Copy verbatim. Only modify lines marked // CUSTOMIZE:
+ */
+
+/**
+ * Required consumer-app files (not included in kai-nextjs template):
+ * - @/lib/api — useCustomDashboardData, useQueryData hooks
+ * - @/lib/constants — COLORS object with chart palette
+ * - @/lib/types — CustomDashboardData interface (if using seed charts)
+ */
+
 import { useState, useRef, useMemo, useCallback, useEffect, Suspense } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactECharts from 'echarts-for-react'
 import { createPortal } from 'react-dom'
-import { X, Maximize2, Pencil, Check, Trash2, LayoutGrid, Download, PlusCircle, BookOpen, Loader2, RefreshCw } from 'lucide-react'
+import { X, Maximize2, Pencil, Check, Trash2, LayoutGrid, Download, Image, PlusCircle, BookOpen, Loader2, RefreshCw } from 'lucide-react'
 import Draggable from 'react-draggable'
 import { Resizable as ResizableBase } from 'react-resizable'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const Resizable = ResizableBase as any
 import 'react-resizable/css/styles.css'
-
-import { useQueryData } from '@/lib/api'
+import { useCustomDashboardData, useQueryData } from '@/lib/api'
 import { COLORS } from '@/lib/constants'
 import { buildOption, TYPES } from '@/lib/chart-utils'
 import {
@@ -25,6 +37,8 @@ import {
   updateChartTitle,
   updateChartType,
   updateAllLayouts,
+  isDashboardSeeded,
+  seedDemoCharts,
 } from '@/lib/dashboard-storage'
 import type { PinnedChart, Dashboard, AnyDashboardChart } from '@/lib/dashboard-storage'
 import { getLibrary } from '@/lib/chart-config-storage'
@@ -33,8 +47,8 @@ import type { SidebarMode } from './ChartBuilderSidebar'
 
 // -- Snap helpers ----
 
-const SNAP = 24
-const MAGNET = SNAP
+const SNAP = 24 // dot grid size in px
+const MAGNET = SNAP // magnetic edge attraction = 1 dot
 
 function snap(v: number) {
   return Math.round(v / SNAP) * SNAP
@@ -49,211 +63,66 @@ function overlaps(ax: number, ay: number, aw: number, ah: number, bx: number, by
 
 type SnapEdges = { left: boolean; right: boolean; top: boolean; bottom: boolean }
 
-function magnetSnap(x: number, y: number, w: number, h: number, others: PinnedChart[]): { x: number; y: number; edges: SnapEdges } {
+function magnetSnap(
+  x: number, y: number, w: number, h: number,
+  others: PinnedChart[],
+): { x: number; y: number; edges: SnapEdges } {
   let sx = x, sy = y
   const edges: SnapEdges = { left: false, right: false, top: false, bottom: false }
+
   for (const o of others) {
     const oL = o.x, oR = o.x + o.w, oT = o.y, oB = o.y + o.h
     if (!edges.left && !edges.right) {
-      if (Math.abs(x - (oR + SNAP)) <= MAGNET)             { sx = oR + SNAP;     edges.left = true }
-      else if (Math.abs((x + w) - (oL - SNAP)) <= MAGNET)  { sx = oL - SNAP - w; edges.right = true }
+      if (Math.abs(x - (oR + SNAP)) <= MAGNET)         { sx = oR + SNAP;         edges.left = true }
+      else if (Math.abs((x + w) - (oL - SNAP)) <= MAGNET) { sx = oL - SNAP - w; edges.right = true }
     }
     if (!edges.top && !edges.bottom) {
-      if (Math.abs(y - (oB + SNAP)) <= MAGNET)             { sy = oB + SNAP;     edges.top = true }
-      else if (Math.abs((y + h) - (oT - SNAP)) <= MAGNET)  { sy = oT - SNAP - h; edges.bottom = true }
+      if (Math.abs(y - (oB + SNAP)) <= MAGNET)         { sy = oB + SNAP;         edges.top = true }
+      else if (Math.abs((y + h) - (oT - SNAP)) <= MAGNET) { sy = oT - SNAP - h; edges.bottom = true }
     }
   }
+
   return { x: Math.max(0, sx), y: Math.max(0, sy), edges }
 }
 
-// -- Chart Card (static/pinned) ----
+// -- ChartShell — shared drag / resize / snap / fullscreen wrapper ----
 
-interface ChartItemProps {
-  chart: PinnedChart
-  others: PinnedChart[]
+interface ChartShellProps {
+  chartId: string
+  x: number; y: number; w: number; h: number
+  others: Array<{ x: number; y: number; w: number; h: number }>
   containerWidth: number
   onDragStop: (id: string, x: number, y: number) => void
   onResizeStop: (id: string, x: number, y: number, w: number, h: number) => void
+  isSelected?: boolean
+  onSelect?: (id: string) => void
+  fullscreenTitle?: string
+  renderHeader: (props: { isDragging: boolean; onRequestFullscreen: () => void }) => React.ReactNode
+  renderContent: (props: { width: number; height: number }) => React.ReactNode
+  renderFullscreen?: () => React.ReactNode
 }
 
-function ChartItem({ chart, others, containerWidth, onDragStop, onResizeStop }: ChartItemProps) {
-  const [editing, setEditing] = useState(false)
-  const [titleDraft, setTitleDraft] = useState(chart.title)
-  const [fullscreen, setFullscreen] = useState(false)
-  const [pos, setPos] = useState({ x: chart.x, y: chart.y })
-  const [size, setSize] = useState({ w: chart.w, h: chart.h })
-  const [snapEdges, setSnapEdges] = useState<SnapEdges>({ left: false, right: false, top: false, bottom: false })
-  const [isDragging, setIsDragging] = useState(false)
-  const lastValidPos = useRef({ x: chart.x, y: chart.y })
-  const resizeStartRef = useRef({ x: chart.x, y: chart.y, w: chart.w, h: chart.h })
-  const chartRef = useRef<any>(null)
-  const nodeRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => { setPos({ x: chart.x, y: chart.y }); lastValidPos.current = { x: chart.x, y: chart.y } }, [chart.x, chart.y])
-  useEffect(() => { setSize({ w: chart.w, h: chart.h }) }, [chart.w, chart.h])
-  useEffect(() => { chartRef.current?.getEchartsInstance?.()?.resize?.() }, [size])
-
-  const option = useMemo(() => buildOption(chart.headers, chart.rows, chart.chartType, false), [chart.headers, chart.rows, chart.chartType])
-  const fsOption = useMemo(() => buildOption(chart.headers, chart.rows, chart.chartType, true), [chart.headers, chart.rows, chart.chartType])
-
-  const handleTitleSave = () => { if (titleDraft.trim()) updateChartTitle(chart.id, titleDraft.trim()); setEditing(false) }
-
-  const snapBorder = {
-    borderTop: snapEdges.top ? '2px solid #097cf7' : undefined,
-    borderBottom: snapEdges.bottom ? '2px solid #097cf7' : undefined,
-    borderLeft: snapEdges.left ? '2px solid #097cf7' : undefined,
-    borderRight: snapEdges.right ? '2px solid #097cf7' : undefined,
-  }
-
-  return (
-    <Draggable
-      nodeRef={nodeRef as React.RefObject<HTMLElement>}
-      handle=".chart-drag-handle"
-      grid={[SNAP, SNAP]}
-      position={pos}
-      bounds={{ left: 0, top: 0, right: containerWidth > 0 ? containerWidth - size.w : undefined }}
-      onStart={() => setIsDragging(true)}
-      onDrag={(_e, d) => {
-        const proposed = { x: Math.max(0, d.x), y: Math.max(0, d.y) }
-        const blocked = others.some((o) => overlaps(proposed.x, proposed.y, size.w, size.h, o.x, o.y, o.w, o.h))
-        if (!blocked) { lastValidPos.current = proposed; setPos(proposed) } else { setPos(lastValidPos.current) }
-        const { edges } = magnetSnap(proposed.x, proposed.y, size.w, size.h, others)
-        setSnapEdges(edges)
-      }}
-      onStop={() => {
-        setIsDragging(false)
-        const base = lastValidPos.current
-        const { x, y, edges } = magnetSnap(snap(base.x), snap(base.y), size.w, size.h, others)
-        const snappedBlocked = others.some((o) => overlaps(x, y, size.w, size.h, o.x, o.y, o.w, o.h))
-        const fx = snappedBlocked ? snap(base.x) : x
-        const fy = snappedBlocked ? snap(base.y) : y
-        setPos({ x: fx, y: fy })
-        setSnapEdges(snappedBlocked ? { left: false, right: false, top: false, bottom: false } : edges)
-        setTimeout(() => setSnapEdges({ left: false, right: false, top: false, bottom: false }), 400)
-        onDragStop(chart.id, fx, fy)
-      }}
-    >
-      <div ref={nodeRef} style={{ position: 'absolute', width: size.w, height: size.h }}>
-        <Resizable
-          width={size.w} height={size.h}
-          minConstraints={[144, 96]} grid={[SNAP, SNAP]}
-          onResizeStart={() => { resizeStartRef.current = { x: pos.x, y: pos.y, w: size.w, h: size.h } }}
-          onResize={(_e: React.SyntheticEvent, data: any) => {
-            const { size: s, handle } = data
-            const isLeft = (handle as string).includes('w'), isTop = (handle as string).includes('n')
-            let newW = s.width, newH = s.height
-            let newX = isLeft ? Math.max(0, resizeStartRef.current.x + resizeStartRef.current.w - newW) : pos.x
-            let newY = isTop ? Math.max(0, resizeStartRef.current.y + resizeStartRef.current.h - newH) : pos.y
-            if (containerWidth > 0 && newX + newW > containerWidth) newW = containerWidth - newX
-            if (others.some((o) => tooClose(newX, newY, newW, newH, o.x, o.y, o.w, o.h, SNAP))) {
-              if (isLeft) { newX = pos.x; newW = size.w } else if (isTop) { newY = pos.y; newH = size.h } else { newW = size.w; newH = size.h }
-            }
-            setPos({ x: newX, y: newY }); setSize({ w: newW, h: newH })
-          }}
-          onResizeStop={(_e: React.SyntheticEvent, data: any) => {
-            const { size: s, handle } = data
-            const isLeft = (handle as string).includes('w'), isTop = (handle as string).includes('n')
-            let newW = snap(s.width), newH = snap(s.height)
-            let newX = isLeft ? snap(Math.max(0, resizeStartRef.current.x + resizeStartRef.current.w - newW)) : snap(pos.x)
-            let newY = isTop ? snap(Math.max(0, resizeStartRef.current.y + resizeStartRef.current.h - newH)) : snap(pos.y)
-            if (containerWidth > 0 && newX + newW > containerWidth) newW = snap(containerWidth - newX)
-            if (others.some((o) => tooClose(newX, newY, newW, newH, o.x, o.y, o.w, o.h, SNAP))) {
-              if (isLeft) { newX = snap(pos.x); newW = snap(size.w) } else if (isTop) { newY = snap(pos.y); newH = snap(size.h) } else { newW = snap(size.w); newH = snap(size.h) }
-            }
-            setPos({ x: newX, y: newY }); setSize({ w: newW, h: newH })
-            onResizeStop(chart.id, newX, newY, newW, newH)
-          }}
-          resizeHandles={['se', 'sw', 'ne', 'nw', 's', 'n', 'e', 'w']}
-        >
-          <div style={{ width: size.w, height: size.h, display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 10, overflow: 'hidden', boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.14)' : '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', transition: 'box-shadow 150ms', ...snapBorder }}>
-            <div className="chart-drag-handle" style={{ cursor: 'grab', background: 'rgba(248,250,252,0.9)', borderBottom: '1px solid #e2e8f0', padding: '6px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 32, flexShrink: 0 }}>
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-                {editing ? (
-                  <input autoFocus value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleTitleSave(); if (e.key === 'Escape') { setTitleDraft(chart.title); setEditing(false) } }}
-                    onBlur={handleTitleSave}
-                    style={{ fontSize: 11, fontWeight: 600, color: '#0b1f3a', background: 'transparent', border: 'none', outline: 'none', flex: 1, minWidth: 0 }} />
-                ) : (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#0b1f3a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chart.title}</span>
-                )}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-                {editing ? (
-                  <button onClick={handleTitleSave} style={{ color: '#16a34a', cursor: 'pointer', padding: 1 }}><Check size={12} /></button>
-                ) : (
-                  <button onClick={(e) => { e.stopPropagation(); setEditing(true) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Rename"><Pencil size={12} /></button>
-                )}
-                <button onClick={(e) => { e.stopPropagation(); setFullscreen(true) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Fullscreen"><Maximize2 size={12} /></button>
-                <button onClick={(e) => { e.stopPropagation(); unpinChart(chart.id) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Remove"><X size={12} /></button>
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 8px', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', flexShrink: 0 }}>
-              {TYPES.map((t) => (
-                <button key={t} onClick={() => updateChartType(chart.id, t)}
-                  style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3, cursor: 'pointer', transition: 'all 150ms', background: chart.chartType === t ? COLORS.brandPrimary : 'transparent', color: chart.chartType === t ? '#fff' : '#64748b', border: `1px solid ${chart.chartType === t ? COLORS.brandPrimary : '#e2e8f0'}` }}>
-                  {t.replace('-', ' ')}
-                </button>
-              ))}
-            </div>
-            <div style={{ flex: 1, minHeight: 0 }}>
-              {option ? (
-                <ReactECharts ref={chartRef} option={option} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} />
-              ) : (
-                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11 }}>No data</div>
-              )}
-            </div>
-          </div>
-        </Resizable>
-
-        {fullscreen && typeof document !== 'undefined' && createPortal(
-          <motion.div className="fixed inset-0" style={{ zIndex: 998, background: 'rgba(0,10,26,0.88)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div style={{ width: '100%', maxWidth: 1100, height: '80vh', background: '#fff', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 60px rgba(0,0,0,0.4)' }}>
-              <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 600, fontSize: 15, color: '#0b1f3a' }}>{chart.title}</span>
-                <button onClick={() => setFullscreen(false)} style={{ color: '#64748b', cursor: 'pointer' }}><X size={20} /></button>
-              </div>
-              <div style={{ flex: 1, minHeight: 0, padding: 16 }}>
-                {fsOption && <ReactECharts option={fsOption} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} />}
-              </div>
-            </div>
-          </motion.div>,
-          document.body,
-        )}
-      </div>
-    </Draggable>
-  )
-}
-
-// -- Dynamic Chart (live query) ----
-
-interface DynamicChartContentProps {
-  configId: string; chartId: string; others: AnyDashboardChart[]; containerWidth: number
-  onDragStop: (id: string, x: number, y: number) => void
-  onResizeStop: (id: string, x: number, y: number, w: number, h: number) => void
-  x: number; y: number; w: number; h: number; pinnedAt: string
-  isSelected?: boolean; onSelect?: (chartId: string) => void
-}
-
-function DynamicChartContent({ configId, chartId, others, containerWidth, onDragStop, onResizeStop, x, y, w, h, isSelected, onSelect }: DynamicChartContentProps) {
-  const config = getLibrary().configs.find((c) => c.id === configId) ?? null
-  const { data, isFetching, refetch } = useQueryData(config)
-  const [fullscreen, setFullscreen] = useState(false)
+function ChartShell({
+  chartId, x, y, w, h,
+  others, containerWidth,
+  onDragStop, onResizeStop,
+  isSelected, onSelect,
+  fullscreenTitle, renderHeader, renderContent, renderFullscreen,
+}: ChartShellProps) {
   const [pos, setPos] = useState({ x, y })
   const [size, setSize] = useState({ w, h })
   const [snapEdges, setSnapEdges] = useState<SnapEdges>({ left: false, right: false, top: false, bottom: false })
   const [isDragging, setIsDragging] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
   const lastValidPos = useRef({ x, y })
   const resizeStartRef = useRef({ x, y, w, h })
-  const chartRef = useRef<any>(null)
   const nodeRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setPos({ x, y }); lastValidPos.current = { x, y } }, [x, y])
   useEffect(() => { setSize({ w, h }) }, [w, h])
-  useEffect(() => { chartRef.current?.getEchartsInstance?.()?.resize?.() }, [size])
 
-  const othersRect = others.map((o) => ({ ...o, title: '', headers: [], rows: [], chartType: 'bar', pinnedAt: '', sourceQuestion: '' } as PinnedChart))
-  const option = useMemo(() => data ? buildOption(data.headers, data.rows, config?.chartType ?? 'bar', false) : null, [data, config?.chartType])
-  const fsOption = useMemo(() => data ? buildOption(data.headers, data.rows, config?.chartType ?? 'bar', true) : null, [data, config?.chartType])
+  // Cast others to PinnedChart shape for magnetSnap / overlap helpers (only x/y/w/h are used)
+  const othersRect = others as PinnedChart[]
 
   const snapBorder = {
     borderTop: snapEdges.top ? '2px solid #097cf7' : undefined,
@@ -261,8 +130,6 @@ function DynamicChartContent({ configId, chartId, others, containerWidth, onDrag
     borderLeft: snapEdges.left ? '2px solid #097cf7' : undefined,
     borderRight: snapEdges.right ? '2px solid #097cf7' : undefined,
   }
-
-  if (!config) return null
 
   return (
     <Draggable
@@ -275,7 +142,8 @@ function DynamicChartContent({ configId, chartId, others, containerWidth, onDrag
       onDrag={(_e, d) => {
         const proposed = { x: Math.max(0, d.x), y: Math.max(0, d.y) }
         const blocked = othersRect.some((o) => overlaps(proposed.x, proposed.y, size.w, size.h, o.x, o.y, o.w, o.h))
-        if (!blocked) { lastValidPos.current = proposed; setPos(proposed) } else setPos(lastValidPos.current)
+        if (!blocked) { lastValidPos.current = proposed; setPos(proposed) }
+        else setPos(lastValidPos.current)
         const { edges } = magnetSnap(proposed.x, proposed.y, size.w, size.h, othersRect)
         setSnapEdges(edges)
       }}
@@ -299,76 +167,227 @@ function DynamicChartContent({ configId, chartId, others, containerWidth, onDrag
           onResizeStart={() => { resizeStartRef.current = { x: pos.x, y: pos.y, w: size.w, h: size.h } }}
           onResize={(_e: React.SyntheticEvent, data: any) => {
             const { size: s, handle } = data
-            const isLeft = (handle as string).includes('w'), isTop = (handle as string).includes('n')
+            const isLeft = (handle as string).includes('w')
+            const isTop = (handle as string).includes('n')
             let newW = s.width, newH = s.height
             let newX = isLeft ? Math.max(0, resizeStartRef.current.x + resizeStartRef.current.w - newW) : pos.x
             let newY = isTop ? Math.max(0, resizeStartRef.current.y + resizeStartRef.current.h - newH) : pos.y
             if (containerWidth > 0 && newX + newW > containerWidth) newW = containerWidth - newX
             if (othersRect.some((o) => tooClose(newX, newY, newW, newH, o.x, o.y, o.w, o.h, SNAP))) {
-              if (isLeft) { newX = pos.x; newW = size.w } else if (isTop) { newY = pos.y; newH = size.h } else { newW = size.w; newH = size.h }
+              if (isLeft) { newX = pos.x; newW = size.w }
+              else if (isTop) { newY = pos.y; newH = size.h }
+              else { newW = size.w; newH = size.h }
             }
             setPos({ x: newX, y: newY }); setSize({ w: newW, h: newH })
           }}
           onResizeStop={(_e: React.SyntheticEvent, data: any) => {
             const { size: s, handle } = data
-            const isLeft = (handle as string).includes('w'), isTop = (handle as string).includes('n')
+            const isLeft = (handle as string).includes('w')
+            const isTop = (handle as string).includes('n')
             let newW = snap(s.width), newH = snap(s.height)
             let newX = isLeft ? snap(Math.max(0, resizeStartRef.current.x + resizeStartRef.current.w - newW)) : snap(pos.x)
             let newY = isTop ? snap(Math.max(0, resizeStartRef.current.y + resizeStartRef.current.h - newH)) : snap(pos.y)
             if (containerWidth > 0 && newX + newW > containerWidth) newW = snap(containerWidth - newX)
             if (othersRect.some((o) => tooClose(newX, newY, newW, newH, o.x, o.y, o.w, o.h, SNAP))) {
-              if (isLeft) { newX = snap(pos.x); newW = snap(size.w) } else if (isTop) { newY = snap(pos.y); newH = snap(size.h) } else { newW = snap(size.w); newH = snap(size.h) }
+              if (isLeft) { newX = snap(pos.x); newW = snap(size.w) }
+              else if (isTop) { newY = snap(pos.y); newH = snap(size.h) }
+              else { newW = snap(size.w); newH = snap(size.h) }
             }
             setPos({ x: newX, y: newY }); setSize({ w: newW, h: newH })
             onResizeStop(chartId, newX, newY, newW, newH)
           }}
           resizeHandles={['se', 'sw', 'ne', 'nw', 's', 'n', 'e', 'w']}
         >
-          <div onClick={() => onSelect?.(chartId)}
-            style={{ width: size.w, height: size.h, display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 10, overflow: 'hidden', boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.14)' : '0 1px 3px rgba(0,0,0,0.06)', border: isSelected ? '2px solid #097cf7' : '1px solid #e2e8f0', transition: 'box-shadow 150ms, border 150ms', ...snapBorder }}>
-            <div className="chart-drag-handle" style={{ cursor: 'grab', background: 'rgba(248,250,252,0.9)', borderBottom: '1px solid #e2e8f0', padding: '6px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 32, flexShrink: 0 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#0b1f3a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{config.name}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-                {isFetching && <Loader2 size={11} style={{ color: '#94a3b8', animation: 'spin 1s linear infinite' }} />}
-                <button onClick={(e) => { e.stopPropagation(); refetch() }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Refresh"><RefreshCw size={11} /></button>
-                <button onClick={(e) => { e.stopPropagation(); setFullscreen(true) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Fullscreen"><Maximize2 size={12} /></button>
-                <button onClick={(e) => { e.stopPropagation(); unpinChart(chartId) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Remove"><X size={12} /></button>
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 8px', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', flexShrink: 0 }}>
-              <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: COLORS.brandPrimary, color: '#fff' }}>{config.chartType.replace('-', ' ')}</span>
-              <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 4 }}>{config.source.replace('_', ' ')} · {config.period ?? 'all time'}</span>
-            </div>
-            <div style={{ flex: 1, minHeight: 0 }}>
-              {isFetching && !data ? (
-                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11, gap: 6 }}>
-                  <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Loading...
-                </div>
-              ) : option ? (
-                <ReactECharts ref={chartRef} option={option} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} />
-              ) : (
-                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11 }}>No data</div>
-              )}
-            </div>
+          <div
+            onClick={() => onSelect?.(chartId)}
+            style={{ width: size.w, height: size.h, display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 10, overflow: 'hidden', boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.14)' : '0 1px 3px rgba(0,0,0,0.06)', border: isSelected ? '2px solid #097cf7' : '1px solid #e2e8f0', transition: 'box-shadow 150ms, border 150ms', ...snapBorder }}
+          >
+            {renderHeader({ isDragging, onRequestFullscreen: () => setFullscreen(true) })}
+            {renderContent({ width: size.w, height: size.h })}
           </div>
         </Resizable>
 
+        {/* Fullscreen portal */}
         {fullscreen && typeof document !== 'undefined' && createPortal(
           <motion.div className="fixed inset-0" style={{ zIndex: 998, background: 'rgba(0,10,26,0.88)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <div style={{ width: '100%', maxWidth: 1100, height: '80vh', background: '#fff', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 60px rgba(0,0,0,0.4)' }}>
               <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 600, fontSize: 15, color: '#0b1f3a' }}>{config.name}</span>
-                <button onClick={() => setFullscreen(false)} style={{ color: '#64748b', cursor: 'pointer' }}><X size={20} /></button>
+                {fullscreenTitle && <span style={{ fontWeight: 600, fontSize: 15, color: '#002151' }}>{fullscreenTitle}</span>}
+                <button onClick={() => setFullscreen(false)} style={{ color: '#64748b', cursor: 'pointer', marginLeft: 'auto' }}><X size={20} /></button>
               </div>
               <div style={{ flex: 1, minHeight: 0, padding: 16 }}>
-                {fsOption && <ReactECharts option={fsOption} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} />}
+                {renderFullscreen?.()}
               </div>
             </div>
           </motion.div>,
           document.body,
         )}
+
       </div>
     </Draggable>
+  )
+}
+
+// -- Chart Card (static / pinned) ----
+
+interface ChartItemProps {
+  chart: PinnedChart
+  others: PinnedChart[]
+  containerWidth: number
+  onDragStop: (id: string, x: number, y: number) => void
+  onResizeStop: (id: string, x: number, y: number, w: number, h: number) => void
+}
+
+function ChartItem({ chart, others, containerWidth, onDragStop, onResizeStop }: ChartItemProps) {
+  const [editing, setEditing] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(chart.title)
+  const chartRef = useRef<any>(null)
+
+  const option = useMemo(() => buildOption(chart.headers, chart.rows, chart.chartType, false), [chart.headers, chart.rows, chart.chartType])
+  const fsOption = useMemo(() => buildOption(chart.headers, chart.rows, chart.chartType, true), [chart.headers, chart.rows, chart.chartType])
+
+  const handleTitleSave = () => { if (titleDraft.trim()) updateChartTitle(chart.id, titleDraft.trim()); setEditing(false) }
+
+  return (
+    <ChartShell
+      chartId={chart.id}
+      x={chart.x} y={chart.y} w={chart.w} h={chart.h}
+      others={others}
+      containerWidth={containerWidth}
+      onDragStop={onDragStop}
+      onResizeStop={onResizeStop}
+      fullscreenTitle={chart.title}
+      renderHeader={({ onRequestFullscreen }) => (
+        <>
+          {/* Drag handle header */}
+          <div className="chart-drag-handle" style={{ cursor: 'grab', background: 'rgba(248,250,252,0.9)', borderBottom: '1px solid #e2e8f0', padding: '6px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 32, flexShrink: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+              {editing ? (
+                <input autoFocus value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleTitleSave(); if (e.key === 'Escape') { setTitleDraft(chart.title); setEditing(false) } }}
+                  onBlur={handleTitleSave}
+                  style={{ fontSize: 11, fontWeight: 600, color: '#002151', background: 'transparent', border: 'none', outline: 'none', flex: 1, minWidth: 0 }}
+                />
+              ) : (
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#002151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chart.title}</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+              {editing ? (
+                <button onClick={handleTitleSave} style={{ color: '#16a34a', cursor: 'pointer', padding: 1 }}><Check size={12} /></button>
+              ) : (
+                <button onClick={(e) => { e.stopPropagation(); setEditing(true) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Rename"><Pencil size={12} /></button>
+              )}
+              <button onClick={(e) => { e.stopPropagation(); onRequestFullscreen() }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Fullscreen"><Maximize2 size={12} /></button>
+              <button onClick={(e) => { e.stopPropagation(); unpinChart(chart.id) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Remove"><X size={12} /></button>
+            </div>
+          </div>
+
+          {/* Chart type pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 8px', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', flexShrink: 0 }}>
+            {TYPES.map((t) => (
+              <button key={t} onClick={() => updateChartType(chart.id, t)}
+                style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3, cursor: 'pointer', transition: 'all 150ms', background: chart.chartType === t ? COLORS.brandPrimary : 'transparent', color: chart.chartType === t ? '#fff' : '#64748b', border: `1px solid ${chart.chartType === t ? COLORS.brandPrimary : '#e2e8f0'}` }}>
+                {t.replace('-', ' ')}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      renderContent={({ width, height }) => {
+        // Trigger echarts resize whenever shell reports a new size
+        void width; void height
+        chartRef.current?.getEchartsInstance?.()?.resize?.()
+        return (
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {option ? (
+              <ReactECharts ref={chartRef} option={option} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} />
+            ) : (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11 }}>No data</div>
+            )}
+          </div>
+        )
+      }}
+      renderFullscreen={() => (
+        fsOption ? <ReactECharts option={fsOption} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} /> : null
+      )}
+    />
+  )
+}
+
+// -- Dynamic Chart (live query) ----
+
+interface DynamicChartContentProps {
+  configId: string
+  chartId: string
+  others: AnyDashboardChart[]
+  containerWidth: number
+  onDragStop: (id: string, x: number, y: number) => void
+  onResizeStop: (id: string, x: number, y: number, w: number, h: number) => void
+  x: number; y: number; w: number; h: number
+  isSelected?: boolean
+  onSelect?: (chartId: string) => void
+}
+
+function DynamicChartContent({ configId, chartId, others, containerWidth, onDragStop, onResizeStop, x, y, w, h, isSelected, onSelect }: DynamicChartContentProps) {
+  const config = getLibrary().configs.find((c) => c.id === configId) ?? null
+  const { data, isFetching, refetch } = useQueryData(config)
+  const chartRef = useRef<any>(null)
+
+  const option = useMemo(() => data ? buildOption(data.headers, data.rows, config?.chartType ?? 'bar', false) : null, [data, config?.chartType])
+  const fsOption = useMemo(() => data ? buildOption(data.headers, data.rows, config?.chartType ?? 'bar', true) : null, [data, config?.chartType])
+
+  if (!config) return null
+
+  return (
+    <ChartShell
+      chartId={chartId}
+      x={x} y={y} w={w} h={h}
+      others={others}
+      containerWidth={containerWidth}
+      onDragStop={onDragStop}
+      onResizeStop={onResizeStop}
+      isSelected={isSelected}
+      onSelect={onSelect}
+      fullscreenTitle={config.name}
+      renderHeader={({ onRequestFullscreen }) => (
+        <>
+          <div className="chart-drag-handle" style={{ cursor: 'grab', background: 'rgba(248,250,252,0.9)', borderBottom: '1px solid #e2e8f0', padding: '6px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 32, flexShrink: 0 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#002151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{config.name}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+              {isFetching && <Loader2 size={11} style={{ color: '#94a3b8', animation: 'spin 1s linear infinite' }} />}
+              <button onClick={(e) => { e.stopPropagation(); refetch() }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Refresh"><RefreshCw size={11} /></button>
+              <button onClick={(e) => { e.stopPropagation(); onRequestFullscreen() }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Fullscreen"><Maximize2 size={12} /></button>
+              <button onClick={(e) => { e.stopPropagation(); unpinChart(chartId) }} style={{ color: '#94a3b8', cursor: 'pointer', padding: 1 }} title="Remove from dashboard"><X size={12} /></button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 8px', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', flexShrink: 0 }}>
+            <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: COLORS.brandPrimary, color: '#fff' }}>{config.chartType.replace('-', ' ')}</span>
+            <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 4 }}>{config.source.replace('_', ' ')} · {config.period ?? 'all time'}</span>
+          </div>
+        </>
+      )}
+      renderContent={({ width, height }) => {
+        void width; void height
+        chartRef.current?.getEchartsInstance?.()?.resize?.()
+        return (
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {isFetching && !data ? (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11, gap: 6 }}>
+                <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Loading...
+              </div>
+            ) : option ? (
+              <ReactECharts ref={chartRef} option={option} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} />
+            ) : (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11 }}>No data</div>
+            )}
+          </div>
+        )
+      }}
+      renderFullscreen={() => (
+        fsOption ? <ReactECharts option={fsOption} style={{ width: '100%', height: '100%' }} opts={{ renderer: 'canvas' }} /> : null
+      )}
+    />
   )
 }
 
@@ -409,6 +428,7 @@ async function exportDashboard(gridRef: React.RefObject<HTMLDivElement | null>, 
   if (!gridRef.current) return
   const { default: html2canvas } = await import('html2canvas-pro')
   const canvas = await html2canvas(gridRef.current, { backgroundColor: '#f8fafc', scale: 2, useCORS: true })
+
   if (format === 'png') {
     const link = document.createElement('a')
     link.download = `dashboard-${new Date().toISOString().slice(0, 10)}.png`
@@ -422,6 +442,11 @@ async function exportDashboard(gridRef: React.RefObject<HTMLDivElement | null>, 
     w.document.close()
   }
 }
+
+// -- Seeding ----
+
+// CUSTOMIZE: Implement seed charts from your app data, OR delete this function AND the seeding useEffect below (search for "isDashboardSeeded").
+function buildSeedCharts(_data: unknown) { return [] }
 
 // -- Styles ----
 
@@ -437,11 +462,27 @@ const PAGE_STYLES = `
     padding: 6px;
     transition: border-color 200ms;
   }
-  .grid-canvas:hover { border-color: rgba(148, 163, 184, 0.45); }
+  .grid-canvas:hover {
+    border-color: rgba(148, 163, 184, 0.45);
+  }
+  /* Raise dragged chart above others */
   .react-draggable-dragging { z-index: 100 !important; }
+  /* react-resizable handles */
   .react-resizable { position: relative; }
-  .react-resizable-handle { position: absolute; width: 14px; height: 14px; z-index: 2; }
-  .react-resizable-handle::after { content: ""; position: absolute; width: 6px; height: 6px; border-right: 2px solid rgba(0,0,0,0.25); border-bottom: 2px solid rgba(0,0,0,0.25); }
+  .react-resizable-handle {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    z-index: 2;
+  }
+  .react-resizable-handle::after {
+    content: "";
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-right: 2px solid rgba(0,0,0,0.25);
+    border-bottom: 2px solid rgba(0,0,0,0.25);
+  }
   .react-resizable-handle-se { bottom: 2px; right: 2px; cursor: se-resize; }
   .react-resizable-handle-se::after { bottom: 2px; right: 2px; }
   .react-resizable-handle-sw { bottom: 2px; left: 2px; cursor: sw-resize; }
@@ -464,7 +505,8 @@ const PAGE_STYLES = `
 
 function CustomDashboardContent() {
   const dashboards = useDashboards()
-  const [activeId, setActiveIdState] = useState('')
+  const [activeId, setActiveId] = useState('')
+  const { data: apiData, isSuccess: apiReady } = useCustomDashboardData()
   const exportAreaRef = useRef<HTMLDivElement>(null)
   const [exporting, setExporting] = useState(false)
   const [containerWidth, setContainerWidth] = useState(0)
@@ -480,11 +522,25 @@ function CustomDashboardContent() {
   }, [])
 
   useEffect(() => {
-    setActiveIdState(getActiveDashboardId())
-    const handler = () => setActiveIdState(getActiveDashboardId())
-    window.addEventListener('ads-sales-dashboards-changed', handler)
-    return () => window.removeEventListener('ads-sales-dashboards-changed', handler)
+    setActiveId(getActiveDashboardId())
+    const handler = () => setActiveId(getActiveDashboardId())
+    window.addEventListener('kai-dashboards-changed', handler)
+    return () => window.removeEventListener('kai-dashboards-changed', handler)
   }, [])
+
+  // CUSTOMIZE: Delete this entire useEffect if you don't implement buildSeedCharts above.
+  useEffect(() => {
+    if (apiReady && apiData) {
+      const seeded = isDashboardSeeded()
+      const db = dashboards[0]
+      const hasOldUnits = db?.charts?.length > 0 && db.charts[0].w < 50
+      const needsReseed = !seeded || !db || db.charts.length < 4 || hasOldUnits
+      if (needsReseed) {
+        localStorage.removeItem('kai-dashboard-seeded')
+        seedDemoCharts(buildSeedCharts(apiData))
+      }
+    }
+  }, [apiReady, apiData, dashboards])
 
   const [sidebarMode, setSidebarMode] = useState<SidebarMode | 'closed'>('closed')
   const [editingConfigId, setEditingConfigId] = useState<string | null>(null)
@@ -516,7 +572,7 @@ function CustomDashboardContent() {
 
   const chartsBottom = allCharts.reduce((max, c) => Math.max(max, c.y + c.h), 0)
   const [extraHeight, setExtraHeight] = useState(0)
-  const canvasHeight = Math.max(chartsBottom + SNAP, chartsBottom + extraHeight, 400)
+  const canvasHeight = Math.max(chartsBottom + SNAP, chartsBottom + extraHeight)
   const canvasResizingRef = useRef(false)
   const canvasResizeStartRef = useRef({ y: 0, h: 0 })
 
@@ -543,12 +599,13 @@ function CustomDashboardContent() {
       <style dangerouslySetInnerHTML={{ __html: PAGE_STYLES + `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }` }} />
 
       <div className="dot-grid-page" style={{ marginRight: sidebarMode !== 'closed' ? 320 : 0, transition: 'margin-right 250ms ease' }}>
-        <div className="py-4">
+        <div className="container-page py-4">
           {/* Toolbar */}
           <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
             <div className="flex items-center gap-2 flex-wrap">
               {dashboards.length > 0 && <DashboardTabs dashboards={dashboards} activeId={activeId} />}
             </div>
+
             <div className="flex items-center gap-2 ml-auto flex-wrap">
               <button
                 onClick={() => { setEditingConfigId(null); setSelectedCanvasChartId(null); setSidebarMode('new') }}
@@ -564,12 +621,10 @@ function CustomDashboardContent() {
               </button>
               {allCharts.length > 0 && (
                 <>
-                  <button onClick={() => handleExport('png')} disabled={exporting}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-border text-brand-secondary/70 hover:text-brand-secondary hover:border-brand-secondary/40 transition-all duration-150 disabled:opacity-50">
-                    PNG
+                  <button onClick={() => handleExport('png')} disabled={exporting} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-border text-brand-secondary/70 hover:text-brand-secondary hover:border-brand-secondary/40 transition-all duration-150 disabled:opacity-50">
+                    <Image size={13} /> PNG
                   </button>
-                  <button onClick={() => handleExport('pdf')} disabled={exporting}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-border text-brand-secondary/70 hover:text-brand-secondary hover:border-brand-secondary/40 transition-all duration-150 disabled:opacity-50">
+                  <button onClick={() => handleExport('pdf')} disabled={exporting} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-border text-brand-secondary/70 hover:text-brand-secondary hover:border-brand-secondary/40 transition-all duration-150 disabled:opacity-50">
                     <Download size={13} /> PDF
                   </button>
                 </>
@@ -585,13 +640,9 @@ function CustomDashboardContent() {
                   <LayoutGrid size={28} className="text-brand-primary" />
                 </div>
                 <h3 className="text-base font-semibold text-brand-secondary mb-2">No charts yet</h3>
-                <p className="text-sm text-gray-500 max-w-xs mb-4">Use &quot;Build Chart&quot; to create your first chart from your data.</p>
-                <button
-                  onClick={() => setSidebarMode('new')}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-brand-primary text-white hover:opacity-90 transition-all"
-                >
-                  <PlusCircle size={15} /> Build Chart
-                </button>
+                <p className="text-sm text-gray-500 max-w-xs">
+                  {apiReady ? 'Use "Build Chart" to create a chart, or wait for demo charts to load.' : 'Loading demo charts from the API...'}
+                </p>
               </motion.div>
             ) : (
               allCharts.map((chart) =>
@@ -605,7 +656,6 @@ function CustomDashboardContent() {
                     onDragStop={handleDragStop}
                     onResizeStop={handleResizeStop}
                     x={chart.x} y={chart.y} w={chart.w} h={chart.h}
-                    pinnedAt={chart.pinnedAt}
                     isSelected={selectedCanvasChartId === chart.id}
                     onSelect={(id) => {
                       setSelectedCanvasChartId(id)
@@ -627,6 +677,7 @@ function CustomDashboardContent() {
             )}
           </div>
 
+          {/* Bottom drag handle */}
           {allCharts.length > 0 && (
             <div
               onMouseDown={handleCanvasResizeStart}
@@ -642,6 +693,7 @@ function CustomDashboardContent() {
         </div>
       </div>
 
+      {/* Chart builder sidebar */}
       <AnimatePresence>
         {sidebarMode !== 'closed' && (
           <ChartBuilderSidebar
