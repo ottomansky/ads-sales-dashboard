@@ -1,9 +1,9 @@
 {
   "/_not-found/page": "/_not-found",
-  "/(dashboard)/ads/page": "/ads",
-  "/(dashboard)/page": "/",
-  "/(dashboard)/products/page": "/products",
   "/(dashboard)/customers/page": "/customers",
   "/(dashboard)/orders/page": "/orders",
-  "/(dashboard)/custom/page": "/custom"
+  "/(dashboard)/page": "/",
+  "/(dashboard)/products/page": "/products",
+  "/(dashboard)/custom/page": "/custom",
+  "/(dashboard)/ads/page": "/ads"
 }
