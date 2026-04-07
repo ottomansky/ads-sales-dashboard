@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — NextActionButtons
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useRouter } from 'next/navigation'
 import { useKaiChat } from '@/lib/kai-context'
 import { cn } from '@/lib/utils'
@@ -33,7 +27,7 @@ function extractInternalLink(text: string): { path: string; label: string } | nu
  */
 function renderSuggestionText(text: string): React.ReactNode {
   const clean = cleanSuggestionText(text)
-  // CUSTOMIZE: Replace with your app's page/section names
+
   const pageNames: string[] = ['Overview', 'Ad Performance', 'Orders', 'Products', 'Customers']
   const pattern = new RegExp(`(${pageNames.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'g')
 

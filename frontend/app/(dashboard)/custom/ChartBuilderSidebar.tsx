@@ -281,17 +281,13 @@ export default function ChartBuilderSidebar({ mode, editingConfigId, activeId, o
 
   return (
     <motion.aside
-      initial={{ x: 340 }}
-      animate={{ x: 0 }}
-      exit={{ x: 340 }}
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: 320, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 320, damping: 30 }}
       style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: 320,
-        zIndex: 50,
+        flexShrink: 0,
+        height: '100%',
         background: '#fff',
         borderLeft: '1px solid #e2e8f0',
         boxShadow: '-4px 0 20px rgba(0,0,0,0.08)',

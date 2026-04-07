@@ -7,15 +7,13 @@
  */
 
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useKaiChat } from '@/lib/kai-context'
 import { SheetChatContent } from './SheetChatContent'
 
 /**
- * Chat Sheet — right-side drawer, matching Keboola platform Chat.tsx.
- *
- * Two layout modes:
- * - sidebar: fixed-width panel on the right (420px)
- * - fullscreen: takes full viewport width, body scroll locked
+ * Chat Sheet — renders as a flex child in sidebar mode (420px),
+ * or as a full-viewport portal in fullscreen mode.
  */
 export function Chat() {
   const { isOpen, layoutMode, closeChat } = useKaiChat()
@@ -34,25 +32,31 @@ export function Chat() {
 
   if (!isOpen) return null
 
-  return (
-    <>
-      {/* Overlay (fullscreen only) */}
-      {isFullscreen && (
+  // Fullscreen mode: portal to body with fixed positioning
+  if (isFullscreen) {
+    return createPortal(
+      <>
         <div
           className="kai-sheet-overlay"
           data-state="open"
           onClick={closeChat}
         />
-      )}
+        <div
+          className="kai-sheet flex flex-col"
+          data-state="open"
+          data-layout="fullscreen"
+        >
+          <SheetChatContent />
+        </div>
+      </>,
+      document.body
+    )
+  }
 
-      {/* Sheet panel */}
-      <div
-        className="kai-sheet flex flex-col"
-        data-state="open"
-        data-layout={layoutMode}
-      >
-        <SheetChatContent />
-      </div>
-    </>
+  // Sidebar mode: normal flex child
+  return (
+    <div className="kai-sheet-inline flex flex-col">
+      <SheetChatContent />
+    </div>
   )
 }

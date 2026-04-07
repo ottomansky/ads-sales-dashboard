@@ -1,11 +1,3 @@
-/**
- * KAI Client -- Chart Utilities
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- *
- * Required consumer-app files (not in kai-nextjs template):
- * - @/lib/constants — COLORS.chart array for chart palette
- */
 
 import { COLORS } from '@/lib/constants'
 

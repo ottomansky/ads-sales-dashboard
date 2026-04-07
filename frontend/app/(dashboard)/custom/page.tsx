@@ -14,7 +14,7 @@
  */
 
 import { useState, useRef, useMemo, useCallback, useEffect, Suspense } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import ReactECharts from 'echarts-for-react'
 import { createPortal } from 'react-dom'
 import { X, Maximize2, Pencil, Check, Trash2, LayoutGrid, Download, Image, PlusCircle, BookOpen, Loader2, RefreshCw } from 'lucide-react'
@@ -23,7 +23,7 @@ import { Resizable as ResizableBase } from 'react-resizable'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const Resizable = ResizableBase as any
 import 'react-resizable/css/styles.css'
-import { useCustomDashboardData, useQueryData } from '@/lib/api'
+import { useQueryData } from '@/lib/api'
 import { COLORS } from '@/lib/constants'
 import { buildOption, TYPES } from '@/lib/chart-utils'
 import {
@@ -37,13 +37,10 @@ import {
   updateChartTitle,
   updateChartType,
   updateAllLayouts,
-  isDashboardSeeded,
-  seedDemoCharts,
 } from '@/lib/dashboard-storage'
 import type { PinnedChart, Dashboard, AnyDashboardChart } from '@/lib/dashboard-storage'
 import { getLibrary } from '@/lib/chart-config-storage'
-import ChartBuilderSidebar from './ChartBuilderSidebar'
-import type { SidebarMode } from './ChartBuilderSidebar'
+import { useSidePanel } from '@/lib/side-panel-context'
 
 // -- Snap helpers ----
 
@@ -200,6 +197,7 @@ function ChartShell({
         >
           <div
             onClick={() => onSelect?.(chartId)}
+            onMouseDown={(e) => e.stopPropagation()}
             style={{ width: size.w, height: size.h, display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 10, overflow: 'hidden', boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.14)' : '0 1px 3px rgba(0,0,0,0.06)', border: isSelected ? '2px solid #097cf7' : '1px solid #e2e8f0', transition: 'box-shadow 150ms, border 150ms', ...snapBorder }}
           >
             {renderHeader({ isDragging, onRequestFullscreen: () => setFullscreen(true) })}
@@ -443,11 +441,6 @@ async function exportDashboard(gridRef: React.RefObject<HTMLDivElement | null>, 
   }
 }
 
-// -- Seeding ----
-
-// CUSTOMIZE: Implement seed charts from your app data, OR delete this function AND the seeding useEffect below (search for "isDashboardSeeded").
-function buildSeedCharts(_data: unknown) { return [] }
-
 // -- Styles ----
 
 const PAGE_STYLES = `
@@ -506,7 +499,6 @@ const PAGE_STYLES = `
 function CustomDashboardContent() {
   const dashboards = useDashboards()
   const [activeId, setActiveId] = useState('')
-  const { data: apiData, isSuccess: apiReady } = useCustomDashboardData()
   const exportAreaRef = useRef<HTMLDivElement>(null)
   const [exporting, setExporting] = useState(false)
   const [containerWidth, setContainerWidth] = useState(0)
@@ -528,23 +520,9 @@ function CustomDashboardContent() {
     return () => window.removeEventListener('kai-dashboards-changed', handler)
   }, [])
 
-  // CUSTOMIZE: Delete this entire useEffect if you don't implement buildSeedCharts above.
-  useEffect(() => {
-    if (apiReady && apiData) {
-      const seeded = isDashboardSeeded()
-      const db = dashboards[0]
-      const hasOldUnits = db?.charts?.length > 0 && db.charts[0].w < 50
-      const needsReseed = !seeded || !db || db.charts.length < 4 || hasOldUnits
-      if (needsReseed) {
-        localStorage.removeItem('kai-dashboard-seeded')
-        seedDemoCharts(buildSeedCharts(apiData))
-      }
-    }
-  }, [apiReady, apiData, dashboards])
 
-  const [sidebarMode, setSidebarMode] = useState<SidebarMode | 'closed'>('closed')
-  const [editingConfigId, setEditingConfigId] = useState<string | null>(null)
-  const [selectedCanvasChartId, setSelectedCanvasChartId] = useState<string | null>(null)
+
+  const { chartBuilderOpen, chartBuilderMode, openChartBuilder, closeChartBuilder, selectedCanvasChartId, setSelectedCanvasChartId } = useSidePanel()
 
   const activeDashboard = dashboards.find((d) => d.id === activeId) ?? dashboards[0]
   const allCharts = activeDashboard?.charts ?? []
@@ -598,7 +576,7 @@ function CustomDashboardContent() {
     <>
       <style dangerouslySetInnerHTML={{ __html: PAGE_STYLES + `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }` }} />
 
-      <div className="dot-grid-page" style={{ marginRight: sidebarMode !== 'closed' ? 320 : 0, transition: 'margin-right 250ms ease' }}>
+      <div className="dot-grid-page">
         <div className="container-page py-4">
           {/* Toolbar */}
           <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
@@ -606,16 +584,16 @@ function CustomDashboardContent() {
               {dashboards.length > 0 && <DashboardTabs dashboards={dashboards} activeId={activeId} />}
             </div>
 
-            <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <div className="flex items-center gap-2 ml-auto flex-wrap" onMouseDown={(e) => e.stopPropagation()}>
               <button
-                onClick={() => { setEditingConfigId(null); setSelectedCanvasChartId(null); setSidebarMode('new') }}
+                onClick={() => { setSelectedCanvasChartId(null); openChartBuilder('new') }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-brand-primary text-white hover:opacity-90 transition-all duration-150"
               >
                 <PlusCircle size={13} /> Build Chart
               </button>
               <button
-                onClick={() => setSidebarMode((m) => m === 'library' ? 'closed' : 'library')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-all duration-150 ${sidebarMode === 'library' ? 'bg-brand-secondary text-white border-brand-secondary' : 'bg-white border-border text-brand-secondary/70 hover:text-brand-secondary hover:border-brand-secondary/40'}`}
+                onClick={() => (chartBuilderOpen && chartBuilderMode === 'library') ? closeChartBuilder() : openChartBuilder('library')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-all duration-150 ${chartBuilderOpen ? 'bg-brand-secondary text-white border-brand-secondary' : 'bg-white border-border text-brand-secondary/70 hover:text-brand-secondary hover:border-brand-secondary/40'}`}
               >
                 <BookOpen size={13} /> Library
               </button>
@@ -641,7 +619,7 @@ function CustomDashboardContent() {
                 </div>
                 <h3 className="text-base font-semibold text-brand-secondary mb-2">No charts yet</h3>
                 <p className="text-sm text-gray-500 max-w-xs">
-                  {apiReady ? 'Use "Build Chart" to create a chart, or wait for demo charts to load.' : 'Loading demo charts from the API...'}
+                  Use &quot;Build Chart&quot; to create your first chart, or pin a table from KAI.
                 </p>
               </motion.div>
             ) : (
@@ -659,8 +637,7 @@ function CustomDashboardContent() {
                     isSelected={selectedCanvasChartId === chart.id}
                     onSelect={(id) => {
                       setSelectedCanvasChartId(id)
-                      setEditingConfigId(chart.configId)
-                      setSidebarMode('edit')
+                      openChartBuilder('edit', chart.configId)
                     }}
                   />
                 ) : (
@@ -693,19 +670,6 @@ function CustomDashboardContent() {
         </div>
       </div>
 
-      {/* Chart builder sidebar */}
-      <AnimatePresence>
-        {sidebarMode !== 'closed' && (
-          <ChartBuilderSidebar
-            mode={sidebarMode}
-            editingConfigId={editingConfigId}
-            activeId={activeId}
-            onClose={() => { setSidebarMode('closed'); setEditingConfigId(null); setSelectedCanvasChartId(null) }}
-            onSwitchMode={(m) => { setSidebarMode(m); if (m !== 'edit') setEditingConfigId(null) }}
-            onEditConfig={(configId) => { setEditingConfigId(configId); setSidebarMode('edit') }}
-          />
-        )}
-      </AnimatePresence>
     </>
   )
 }

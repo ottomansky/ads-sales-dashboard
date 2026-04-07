@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ChatHistoryPanel
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { Search, Plus, MessageSquare, Trash2 } from 'lucide-react'
 import { useGroupedConversations } from '@/lib/use-grouped-conversations'
 import { cn } from '@/lib/utils'

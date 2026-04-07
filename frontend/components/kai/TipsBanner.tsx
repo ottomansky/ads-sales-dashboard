@@ -1,16 +1,9 @@
 'use client'
 
-/**
- * KAI Client — TipsBanner
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useRef, useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
 
-// CUSTOMIZE: Replace these tips with domain-specific hints relevant to your app
 const TIPS = [
   'Ask KAI to compare Google Ads vs Meta Ads performance to find your best channel.',
   "Try asking: 'What is our ROAS trend over the last 6 months?'",

@@ -6,11 +6,11 @@
  * Copy verbatim. Only modify lines marked // CUSTOMIZE:
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Copy, Check, Loader2, CheckCircle2, XCircle, ChevronDown } from 'lucide-react'
+import { Copy, Check, Loader2, CheckCircle2, XCircle, ChevronDown, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TOOL_CALL_MARKER_RE, useKaiChat } from '@/lib/kai-context'
 import type { ToolCallState } from '@/lib/kai-context'
@@ -133,6 +133,127 @@ function keboolaTableUrl(tableId: string, connUrl: string, projId: string): stri
 /** Build a Keboola Storage URL for a bucket */
 function keboolaBucketUrl(bucketId: string, connUrl: string, projId: string): string {
   return `${connUrl}/admin/projects/${projId}/storage/buckets/${encodeURIComponent(bucketId)}`
+}
+
+// ─── Prose table-reference detection ─────────────────────────────────────────
+
+type TextSegment =
+  | { type: 'text'; value: string }
+  | { type: 'table-ref'; name: string; tableId: string }
+  | { type: 'bucket-ref'; name: string; bucketId: string }
+
+/** Build a regex that matches any known table/bucket name or full ID in text */
+const TABLE_REF_REGEX = (() => {
+  // Collect all matchable strings, sorted longest-first to avoid partial matches
+  const candidates: { pattern: string; kind: 'table' | 'bucket'; id: string }[] = []
+  for (const [short, full] of Object.entries(TABLE_ID_MAP)) {
+    candidates.push({ pattern: full, kind: 'table', id: full })
+    candidates.push({ pattern: short, kind: 'table', id: full })
+  }
+  for (const [short, full] of Object.entries(BUCKET_ID_MAP)) {
+    candidates.push({ pattern: full, kind: 'bucket', id: full })
+    candidates.push({ pattern: short, kind: 'bucket', id: full })
+  }
+  candidates.sort((a, b) => b.pattern.length - a.pattern.length)
+  return { candidates }
+})()
+
+function detectTableReferences(text: string): TextSegment[] {
+  if (!text) return [{ type: 'text', value: text }]
+
+  const { candidates } = TABLE_REF_REGEX
+  const segments: TextSegment[] = []
+  let remaining = text
+
+  while (remaining.length > 0) {
+    let earliestMatch: { index: number; length: number; candidate: typeof candidates[0] } | null = null
+
+    for (const c of candidates) {
+      const pattern = new RegExp(`\\b${c.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+      const match = pattern.exec(remaining)
+      if (match && (!earliestMatch || match.index < earliestMatch.index)) {
+        earliestMatch = { index: match.index, length: match[0].length, candidate: c }
+      }
+    }
+
+    if (!earliestMatch) {
+      segments.push({ type: 'text', value: remaining })
+      break
+    }
+
+    if (earliestMatch.index > 0) {
+      segments.push({ type: 'text', value: remaining.slice(0, earliestMatch.index) })
+    }
+
+    const matchedText = remaining.slice(earliestMatch.index, earliestMatch.index + earliestMatch.length)
+    if (earliestMatch.candidate.kind === 'table') {
+      segments.push({ type: 'table-ref', name: matchedText, tableId: earliestMatch.candidate.id })
+    } else {
+      segments.push({ type: 'bucket-ref', name: matchedText, bucketId: earliestMatch.candidate.id })
+    }
+
+    remaining = remaining.slice(earliestMatch.index + earliestMatch.length)
+  }
+
+  return segments
+}
+
+/** Recursively walk React children, replacing string children with table links */
+function TextWithTableLinks({ children, connectionUrl, projectId }: {
+  children: React.ReactNode
+  connectionUrl: string
+  projectId: string
+}) {
+  const canLink = Boolean(connectionUrl && projectId)
+  if (!canLink) return <>{children}</>
+
+  const processNode = (node: React.ReactNode): React.ReactNode => {
+    if (typeof node === 'string') {
+      const segments = detectTableReferences(node)
+      if (segments.length === 1 && segments[0].type === 'text') return node
+      return segments.map((seg, i) => {
+        if (seg.type === 'text') return seg.value
+        if (seg.type === 'table-ref') {
+          return (
+            <a
+              key={i}
+              href={keboolaTableUrl(seg.tableId, connectionUrl, projectId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-primary underline hover:text-brand-secondary inline-flex items-center gap-0.5"
+            >
+              {seg.name}<ExternalLink size={11} className="inline opacity-60" />
+            </a>
+          )
+        }
+        // bucket-ref
+        return (
+          <a
+            key={i}
+            href={keboolaBucketUrl(seg.bucketId, connectionUrl, projectId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-brand-primary underline hover:text-brand-secondary inline-flex items-center gap-0.5"
+          >
+            {seg.name}<ExternalLink size={11} className="inline opacity-60" />
+          </a>
+        )
+      })
+    }
+
+    if (Array.isArray(node)) return node.map(processNode)
+
+    if (node && typeof node === 'object' && 'props' in (node as any)) {
+      // Don't recurse into <a> tags (already links) or <code> tags
+      const el = node as React.ReactElement
+      if (el.type === 'a' || el.type === 'code') return node
+      return node
+    }
+
+    return node
+  }
+
+  return <>{processNode(children)}</>
 }
 
 /** Render a single string value, auto-linking any Keboola references */
@@ -307,76 +428,97 @@ function CodeBlockCopyButton({ code }: { code: string }) {
 
 // ─── Markdown component overrides ─────────────────────────────────────────────
 
-const markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
-  code({ className, children, ...props }) {
-    // react-markdown v9: inline detection via absence of className (language-*)
-    const isBlock = Boolean(className)
-    if (!isBlock) {
+function buildMarkdownComponents(
+  connectionUrl: string,
+  projectId: string,
+): React.ComponentProps<typeof ReactMarkdown>['components'] {
+  return {
+    code({ className, children, ...props }) {
+      // react-markdown v9: inline detection via absence of className (language-*)
+      const isBlock = Boolean(className)
+      if (!isBlock) {
+        return (
+          <code
+            className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono"
+            {...props}
+          >
+            {children}
+          </code>
+        )
+      }
+      // Block code — just render children; <pre> wrapper handles the container
+      return <>{children}</>
+    },
+
+    pre({ children }) {
+      // Extract raw text from the nested code element for copy button
+      const extractText = (node: React.ReactNode): string => {
+        if (typeof node === 'string') return node
+        if (Array.isArray(node)) return node.map(extractText).join('')
+        if (node && typeof node === 'object' && 'props' in (node as any)) {
+          return extractText((node as any).props?.children)
+        }
+        return ''
+      }
+      const codeText = extractText(children)
+
       return (
-        <code
-          className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono"
-          {...props}
+        <div className="relative group">
+          <pre className="bg-surface rounded-xl p-4 overflow-x-auto text-xs font-mono max-h-[50svh] overflow-y-auto">
+            {children}
+          </pre>
+          <CodeBlockCopyButton code={codeText} />
+        </div>
+      )
+    },
+
+    p({ children }) {
+      return (
+        <p className="whitespace-pre-line">
+          <TextWithTableLinks connectionUrl={connectionUrl} projectId={projectId}>
+            {children}
+          </TextWithTableLinks>
+        </p>
+      )
+    },
+
+    li({ children }) {
+      return (
+        <li>
+          <TextWithTableLinks connectionUrl={connectionUrl} projectId={projectId}>
+            {children}
+          </TextWithTableLinks>
+        </li>
+      )
+    },
+
+    a({ href, children }) {
+      const isInternal = href?.startsWith('/')
+      if (isInternal && href) {
+        return (
+          <Link href={href} className="text-blue-600 underline decoration-blue-300 hover:decoration-blue-600">
+            {children}
+          </Link>
+        )
+      }
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-brand-primary underline hover:text-brand-secondary"
         >
           {children}
-        </code>
+        </a>
       )
-    }
-    // Block code — just render children; <pre> wrapper handles the container
-    return <>{children}</>
-  },
+    },
 
-  pre({ children }) {
-    // Extract raw text from the nested code element for copy button
-    const extractText = (node: React.ReactNode): string => {
-      if (typeof node === 'string') return node
-      if (Array.isArray(node)) return node.map(extractText).join('')
-      if (node && typeof node === 'object' && 'props' in (node as any)) {
-        return extractText((node as any).props?.children)
-      }
-      return ''
-    }
-    const codeText = extractText(children)
-
-    return (
-      <div className="relative group">
-        <pre className="bg-surface rounded-xl p-4 overflow-x-auto text-xs font-mono max-h-[50svh] overflow-y-auto">
-          {children}
-        </pre>
-        <CodeBlockCopyButton code={codeText} />
-      </div>
-    )
-  },
-
-  p({ children }) {
-    return <p className="whitespace-pre-line">{children}</p>
-  },
-
-  a({ href, children }) {
-    const isInternal = href?.startsWith('/')
-    if (isInternal && href) {
-      return (
-        <Link href={href} className="text-brand-primary underline hover:text-brand-secondary">
-          {children}
-        </Link>
-      )
-    }
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-brand-primary underline hover:text-brand-secondary"
-      >
-        {children}
-      </a>
-    )
-  },
-
-  // Tables are intercepted at the top level and rendered as KaiTableChart.
-  // We collect headers and rows from the DOM structure.
-  table({ children }) {
-    return <KaiTableCollector>{children}</KaiTableCollector>
-  },
+    // Tables are intercepted at the top level and rendered as KaiTableChart.
+    // We collect headers and rows from the DOM structure.
+    table({ children }) {
+      return <KaiTableCollector>{children}</KaiTableCollector>
+    },
+  }
 }
 
 /**
@@ -456,6 +598,11 @@ interface MessageBubbleProps {
 }
 
 export default function MessageBubble({ role, content, streaming = false, toolCalls = [] }: MessageBubbleProps) {
+  const { connectionUrl, projectId } = useKaiChat()
+  const markdownComponents = useMemo(
+    () => buildMarkdownComponents(connectionUrl, projectId),
+    [connectionUrl, projectId]
+  )
   const { cleanContent } = stripNextActions(content)
 
   if (role === 'user') {

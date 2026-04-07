@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ChatContent
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useKaiChat } from '@/lib/kai-context'
 import type { KaiMessage } from '@/lib/kai-context'
 import MessageBubble, { stripNextActions } from './MessageBubble'

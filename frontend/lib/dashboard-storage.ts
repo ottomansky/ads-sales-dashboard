@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client -- Dashboard Storage
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useState, useEffect } from 'react'
 import type { AnyDashboardChart, DashboardChart } from './chart-config-storage'
 
@@ -39,9 +33,9 @@ export interface Dashboard {
 
 // -- Constants ----
 
-const STORAGE_KEY = 'kai-dashboards' // CUSTOMIZE: localStorage key for dashboards
-const ACTIVE_KEY = 'kai-active-dashboard' // CUSTOMIZE: localStorage key for active dashboard ID
-const SEEDED_KEY = 'kai-dashboard-seeded' // CUSTOMIZE: localStorage key for seeded flag
+const STORAGE_KEY = 'kai-dashboards'
+const ACTIVE_KEY = 'kai-active-dashboard'
+const SEEDED_KEY = 'kai-dashboard-seeded'
 const CHANGE_EVENT = 'kai-dashboards-changed'
 const MAX_CHARTS = 20
 const MAX_DASHBOARDS = 10

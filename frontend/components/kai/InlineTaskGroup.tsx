@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — InlineTaskGroup
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useState } from 'react'
 import { Loader2, CheckCircle2, XCircle, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'

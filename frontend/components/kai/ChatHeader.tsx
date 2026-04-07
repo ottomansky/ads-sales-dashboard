@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ChatHeader
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { Sparkles, Plus, X, Maximize2, Minimize2 } from 'lucide-react'
 import { useKaiChat } from '@/lib/kai-context'
 import { cn } from '@/lib/utils'

@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — Chat Context Provider
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import {
   createContext,
   useContext,
@@ -91,7 +85,6 @@ export function useKaiChat() {
 
 // ─── System context builder ───────────────────────────────────────────────────
 
-// CUSTOMIZE: Replace with your app's page descriptions — map each route to a human-readable summary of what's on the page
 const PAGE_DESCRIPTIONS: Record<string, string> = {
   '/': 'Overview — KPI cards (total revenue, total ad spend, ROAS, order count, avg order value) and a revenue vs ad-costs time-series chart.',
   '/ads': 'Ad Performance — Google Ads campaign table (clicks, impressions, cost, sessions, conversions) and Meta Ads table (ad name, clicks, impressions, spend). Summary totals for each platform.',
@@ -103,7 +96,7 @@ const PAGE_DESCRIPTIONS: Record<string, string> = {
 
 function buildSystemContext(pathname: string): string {
   const currentPage = PAGE_DESCRIPTIONS[pathname] ?? ''
-  // CUSTOMIZE: Replace the return value below with your app-specific system context.
+
   // Include: app name, page descriptions, data table schemas, KPI formulas.
   return `You are KAI, the AI assistant embedded in the "Ads & Sales Dashboard" Keboola data app.
 

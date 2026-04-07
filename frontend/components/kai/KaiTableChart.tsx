@@ -3,7 +3,7 @@
 /**
  * KAI Client — KaiTableChart
  * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
+ * Copy verbatim. Only modify lines marked
  *
  * Renders a markdown table returned by KAI with:
  *  - Sortable column headers (click to sort asc → desc → clear)

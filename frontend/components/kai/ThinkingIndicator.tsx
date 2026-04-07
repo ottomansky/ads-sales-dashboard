@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ThinkingIndicator
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { Sparkles } from 'lucide-react'
 
 export default function ThinkingIndicator() {

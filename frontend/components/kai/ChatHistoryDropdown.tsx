@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ChatHistoryDropdown
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useState, useRef, useEffect } from 'react'
 import { ChevronUp, ChevronDown, Search, Plus } from 'lucide-react'
 import { useGroupedConversations } from '@/lib/use-grouped-conversations'

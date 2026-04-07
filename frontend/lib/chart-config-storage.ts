@@ -1,15 +1,9 @@
 'use client'
 
-/**
- * KAI Client -- Chart Config Storage
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useState, useEffect } from 'react'
 import type { ChartType } from './chart-utils'
 
-export type DataSource = 'marketing_metrics' | 'orders' | 'ga4_analytics' | 'meta_insights' // CUSTOMIZE: Replace with your app's table short names as a union type
+export type DataSource = 'marketing_metrics' | 'orders' | 'ga4_analytics' | 'meta_insights'
 export type Period = 'L3M' | 'L6M' | 'YTD' | '12M'
 
 export interface ChartConfig {

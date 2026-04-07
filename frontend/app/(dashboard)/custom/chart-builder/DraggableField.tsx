@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client -- DraggableField
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useDraggable } from '@dnd-kit/core'
 import { Calendar, Hash } from 'lucide-react'
 

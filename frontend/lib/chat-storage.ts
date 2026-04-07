@@ -1,8 +1,3 @@
-/**
- * KAI Client — Conversation Storage
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
 
 /*
  * CONVERSATION STORAGE — localStorage-based, max 50 conversations.
@@ -25,7 +20,7 @@ export interface Conversation {
   updatedAt: number
 }
 
-const STORAGE_KEY = 'ads-sales-conversations' // CUSTOMIZE: localStorage key prefix for your app
+const STORAGE_KEY = 'ads-sales-conversations'
 const MAX_CONVERSATIONS = 50
 
 function load(): Conversation[] {

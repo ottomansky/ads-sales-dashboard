@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — MessageActions
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useState } from 'react'
 import { Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { cn } from '@/lib/utils'

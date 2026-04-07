@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ToolApprovalCard
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 

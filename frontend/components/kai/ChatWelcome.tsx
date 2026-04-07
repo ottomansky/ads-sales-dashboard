@@ -1,18 +1,11 @@
 'use client'
 
-/**
- * KAI Client — ChatWelcome
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { BarChart2, Users, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import ChatInput from './ChatInput'
 
 // ─── Starter prompts ──────────────────────────────────────────────────────────
 
-// CUSTOMIZE: Replace these starter prompts with queries relevant to your app's domain
 const STARTER_PROMPTS = [
   {
     label: 'Ad performance',

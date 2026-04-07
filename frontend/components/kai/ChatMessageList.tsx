@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ChatMessageList
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import ChatContent from './ChatContent'

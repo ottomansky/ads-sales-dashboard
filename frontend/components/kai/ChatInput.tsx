@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client — ChatInput
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useRef, useEffect } from 'react'
 import { Send, Square, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'

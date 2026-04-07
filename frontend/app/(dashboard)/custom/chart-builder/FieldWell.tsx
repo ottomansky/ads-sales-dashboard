@@ -1,11 +1,5 @@
 'use client'
 
-/**
- * KAI Client -- FieldWell
- * Source: keboola/kai-client/kai-nextjs/
- * Copy verbatim. Only modify lines marked // CUSTOMIZE:
- */
-
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import SortableFieldChip from './SortableFieldChip'
